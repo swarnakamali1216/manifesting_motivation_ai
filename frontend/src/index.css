@@ -1,0 +1,141 @@
+/*
+ * frontend/src/index.css
+ *
+ * YOUR App.css ALREADY HAS COMPLETE CSS VARIABLES FOR DARK/LIGHT MODE.
+ * This file previously conflicted by redefining variables incorrectly.
+ *
+ * WHAT THIS FILE NOW DOES:
+ * - NO variable redefinitions (App.css handles all --bg, --text, --card etc.)
+ * - Only adds things App.css doesn't have: animations, utility classes, input fixes
+ *
+ * DARK MODE WORKS VIA: html.dark class (set by App.jsx on document.documentElement)
+ * App.css already has: html.dark { --text: ..., --bg: ..., etc. }
+ * So dark mode text IS correct — don't redefine variables here.
+ */
+
+/* ── Font import ─────────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800;900&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+
+/* ── Base ────────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Code ────────────────────────────────────────────────────────────────────── */
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  background: var(--card);
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+
+/* ── Input class used by components ──────────────────────────────────────────── */
+.input {
+  background:  var(--input-bg, var(--card))     !important;
+  color:       var(--input-text, var(--text))   !important;
+  border:      1px solid var(--input-border, var(--border)) !important;
+  font-family: 'DM Sans', sans-serif;
+}
+.input::placeholder { color: var(--input-placeholder, var(--muted)) !important; }
+.input:focus {
+  border-color: var(--accent) !important;
+  box-shadow:   0 0 0 3px rgba(124,92,252,0.12) !important;
+  outline:      none !important;
+}
+
+/* ── btn-primary (used in Journal, etc.) ─────────────────────────────────────── */
+.btn-primary {
+  background:    linear-gradient(135deg, var(--accent), #9c7cfc);
+  color:         #fff !important;
+  border:        none;
+  border-radius: 12px;
+  padding:       10px 18px;
+  font-weight:   700;
+  font-size:     14px;
+  font-family:   'Syne', sans-serif;
+  cursor:        pointer;
+  transition:    opacity 0.15s, transform 0.15s;
+}
+.btn-primary:hover:not(:disabled) { opacity: 0.9; }
+.btn-primary:active:not(:disabled) { transform: scale(0.98); }
+.btn-primary:disabled { cursor: not-allowed; opacity: 0.5; }
+
+/* ── Accent color classes — toggled by Settings ──────────────────────────────── */
+/* These override the --accent variable defined in App.css */
+html.accent-blue,   body.accent-blue   { --accent:#3b82f6 !important; }
+html.accent-green,  body.accent-green  { --accent:#22c55e !important; }
+html.accent-orange, body.accent-orange { --accent:#f97316 !important; }
+html.accent-red,    body.accent-red    { --accent:#ef4444 !important; }
+html.accent-pink,   body.accent-pink   { --accent:#ec4899 !important; }
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ── Animations ──────────────────────────────────────────────────────────────── */
+@keyframes fadeIn        { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+@keyframes slideInUp     { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+@keyframes pulse         { 0%,100%{opacity:1} 50%{opacity:0.5} }
+@keyframes spin          { to{transform:rotate(360deg)} }
+@keyframes shimmer       { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+@keyframes xpFloat       { 0%{opacity:0;transform:translateX(-50%) translateY(20px) scale(0.7)} 25%{opacity:1;transform:translateX(-50%) translateY(-10px) scale(1.05)} 80%{opacity:1;transform:translateX(-50%) translateY(-24px) scale(1)} 100%{opacity:0;transform:translateX(-50%) translateY(-50px) scale(0.9)} }
+@keyframes milestoneB    { from{transform:translateY(0)} to{transform:translateY(-10px)} }
+@keyframes dropIn        { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+@keyframes typingDot     { 0%,60%,100%{transform:translateY(0);opacity:0.4} 30%{transform:translateY(-6px);opacity:1} }
+
+/* ── Chat container — FIXED HEIGHT so content doesn't push page up ───────────── */
+/*
+ * IMPORTANT: Apply these classes in Dashboard.jsx chat section.
+ * The chat box must have a fixed height with the messages scrollable inside.
+ * Input stays at the bottom always.
+ */
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 520px;          /* fixed height — messages scroll inside */
+  max-height: 70vh;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-behavior: smooth;
+}
+
+.chat-messages::-webkit-scrollbar { width: 4px; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.chat-input-area {
+  flex-shrink: 0;           /* never shrinks — always at bottom */
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.chat-quick-replies {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  background: var(--surface);
+}

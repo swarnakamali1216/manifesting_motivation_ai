@@ -1,8 +1,10 @@
 ﻿.env
 backend/.env
 __pycache__/
+**/__pycache__/
 *.pyc
 *.db
 venv/
 chroma_db/
 backend/.gitignore
+backend/chroma_db/

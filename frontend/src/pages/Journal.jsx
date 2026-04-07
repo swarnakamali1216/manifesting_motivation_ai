@@ -189,8 +189,8 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
   useEffect(function(){
     setTimeout(function(){ textRef.current && textRef.current.focus(); }, 100);
     if (!isEdit) setPrompt(PROMPTS[Math.floor(Math.random()*PROMPTS.length)]);
-  }, [isEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  }, [isEdit]); // eslint-disable-line react-hooks/exhaustive-deps
   function toggleTag(t) {
     setSelTags(function(p){ return p.includes(t) ? p.filter(function(x){return x!==t;}) : p.concat(t); });
   }

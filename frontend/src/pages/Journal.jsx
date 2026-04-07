@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 
-var API = "http://localhost:5000/api";
+var API = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
 var MOODS = [
   { key:"amazing",  emoji:"🌟", label:"Amazing",   color:"#fbbf24", bg:"rgba(251,191,36,0.12)"  },
@@ -31,7 +31,6 @@ var PROMPTS = [
 
 function toIST(iso) {
   if (!iso) return new Date();
-  // Backend stores UTC. Add IST offset for display.
   return new Date(new Date(iso).getTime() + 330 * 60000);
 }
 function formatDate(iso) {
@@ -57,16 +56,14 @@ function MoodStreak({ entries }) {
   var days = {};
   entries.forEach(function(e){
     if (!e.created_at) return;
-    // Convert UTC created_at to IST date string so keys match the week loop below
     var d = new Date(new Date(e.created_at).getTime() + IST_MS).toISOString().slice(0,10);
     if (d) days[d] = e.mood || "okay";
   });
   var result = [];
-  // IST_MS already declared above — reuse it
   for (var i=6; i>=0; i--) {
     var nowIST = new Date(Date.now() + IST_MS);
     nowIST.setUTCDate(nowIST.getUTCDate() - i);
-    var key      = nowIST.toISOString().slice(0,10); // IST date string
+    var key      = nowIST.toISOString().slice(0,10);
     var dayLabel = ["S","M","T","W","T","F","S"][nowIST.getUTCDay()];
     result.push({ key, dayLabel, mood: days[key]||null });
   }
@@ -107,7 +104,6 @@ function EntryCard({ entry, onDelete, onEdit }) {
       onMouseEnter={function(e){ e.currentTarget.style.boxShadow="0 4px 20px rgba(124,92,252,0.1)"; e.currentTarget.style.borderColor="rgba(124,92,252,0.2)"; }}
       onMouseLeave={function(e){ e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.04)"; e.currentTarget.style.borderColor="var(--border)"; }}
     >
-      {/* Top bar */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 14px 8px" }}>
         <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
           {mood && (
@@ -152,7 +148,6 @@ function EntryCard({ entry, onDelete, onEdit }) {
         </div>
       </div>
 
-      {/* Tags */}
       {tags.length > 0 && (
         <div style={{ display:"flex", flexWrap:"wrap", gap:"4px", padding:"0 14px 8px" }}>
           {tags.filter(Boolean).map(function(t){
@@ -161,7 +156,6 @@ function EntryCard({ entry, onDelete, onEdit }) {
         </div>
       )}
 
-      {/* Content */}
       <div style={{ padding:"0 14px 12px" }}>
         <div style={{ fontSize:"13px", lineHeight:"1.7", color:"var(--text2)", whiteSpace:"pre-wrap", wordBreak:"break-word" }}>
           {expanded ? entry.content : preview}{isLong && !expanded ? "..." : ""}
@@ -174,7 +168,6 @@ function EntryCard({ entry, onDelete, onEdit }) {
         )}
       </div>
 
-      {/* Mood bar */}
       {mood && (
         <div style={{ height:"3px", background:"linear-gradient(90deg,"+mood.color+"44,"+mood.color+")" }} />
       )}
@@ -193,11 +186,10 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
   var [prompt,  setPrompt]  = useState(null);
   var textRef = useRef(null);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(function(){
     setTimeout(function(){ textRef.current && textRef.current.focus(); }, 100);
     if (!isEdit) setPrompt(PROMPTS[Math.floor(Math.random()*PROMPTS.length)]);
-  },[]);
+  }, [isEdit]);
 
   function toggleTag(t) {
     setSelTags(function(p){ return p.includes(t) ? p.filter(function(x){return x!==t;}) : p.concat(t); });
@@ -239,7 +231,6 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
         border:"1px solid var(--border)", borderBottom:"none",
         animation:"slideUp 0.25s ease",
       }}>
-        {/* Header */}
         <div style={{ padding:"16px 20px 12px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:"1px solid var(--border)" }}>
           <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:"900", fontSize:"16px", color:"var(--text)" }}>
             {isEdit ? "✏️ Edit Entry" : "✍️ New Entry"}
@@ -251,7 +242,6 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
         </div>
 
         <div style={{ overflowY:"auto", flex:1, padding:"16px 20px" }}>
-          {/* Writing prompt */}
           {!isEdit && prompt && (
             <div style={{ background:"rgba(124,92,252,0.06)", border:"1px solid rgba(124,92,252,0.15)", borderRadius:"12px", padding:"10px 14px", marginBottom:"14px", cursor:"pointer" }}
               onClick={function(){ setContent(function(p){ return p ? p+"\n\n"+prompt : prompt; }); setPrompt(null); }}>
@@ -260,7 +250,6 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
             </div>
           )}
 
-          {/* Title */}
           <input
             placeholder="Entry title (optional)"
             value={title}
@@ -268,7 +257,6 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
             style={{ width:"100%", boxSizing:"border-box", background:"var(--card)", border:"1px solid var(--border)", borderRadius:"10px", padding:"10px 14px", fontSize:"14px", fontFamily:"'Syne',sans-serif", fontWeight:"700", color:"var(--text)", marginBottom:"10px", outline:"none" }}
           />
 
-          {/* Mood picker */}
           <div style={{ marginBottom:"12px" }}>
             <div style={{ fontSize:"9px", color:"var(--muted)", fontFamily:"'Syne',sans-serif", fontWeight:"800", letterSpacing:"0.1em", marginBottom:"6px" }}>HOW ARE YOU FEELING?</div>
             <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
@@ -284,7 +272,6 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* Content */}
           <textarea
             ref={textRef}
             placeholder={"Write freely... your thoughts are safe here.\n\nThis is your private space — be honest with yourself."}
@@ -293,7 +280,6 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
             style={{ width:"100%", boxSizing:"border-box", minHeight:"200px", background:"var(--card)", border:"1px solid var(--border)", borderRadius:"12px", padding:"14px", fontSize:"14px", fontFamily:"'DM Sans',sans-serif", lineHeight:"1.8", color:"var(--text)", resize:"vertical", outline:"none", marginBottom:"12px" }}
           />
 
-          {/* Tags */}
           <div>
             <div style={{ fontSize:"9px", color:"var(--muted)", fontFamily:"'Syne',sans-serif", fontWeight:"800", letterSpacing:"0.1em", marginBottom:"6px" }}>ADD TAGS</div>
             <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
@@ -310,7 +296,6 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
           </div>
         </div>
 
-        {/* Footer */}
         <div style={{ padding:"12px 20px", borderTop:"1px solid var(--border)", display:"flex", justifyContent:"space-between", alignItems:"center", background:"var(--surface)" }}>
           <div style={{ fontSize:"10px", color:"var(--muted)", display:"flex", alignItems:"center", gap:"5px" }}>
             🔒 <span>Private & encrypted — only you can see this</span>
@@ -344,7 +329,7 @@ function Journal({ user }) {
   var [filterTag,  setFilterTag]  = useState("");
   var [sortDir,    setSortDir]    = useState("desc");
 
-  useEffect(function(){ load(); }, [user]);  // eslint-disable-line
+  useEffect(function(){ load(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function load() {
     if (!user) return;
@@ -364,7 +349,6 @@ function Journal({ user }) {
   function handleEdit(entry) { setEditEntry(entry); setShowWrite(true); }
   function handleNew()       { setEditEntry(null);  setShowWrite(true); }
 
-  // Filter + search + sort
   var filtered = entries
     .filter(function(e){
       if (filterMood && e.mood !== filterMood) return false;
@@ -380,26 +364,16 @@ function Journal({ user }) {
       return sortDir==="desc" ? db-da : da-db;
     });
 
-  // Stats
   var totalWords  = entries.reduce(function(s,e){ return s+wordCount(e.content); }, 0);
-  var moodCounts  = {};
-  entries.forEach(function(e){ if(e.mood) moodCounts[e.mood]=(moodCounts[e.mood]||0)+1; });
-  // Use mood_score (VADER) for positive/tough — not the mood string which is often "okay"
   var posCount    = entries.filter(function(e){ return (e.mood_score||0) >= 0.2; }).length;
   var toughCount  = entries.filter(function(e){ return (e.mood_score||0) <= -0.2; }).length;
-  // streakDays: unique IST dates (add 330min offset so date boundary is correct)
   var IST_MS2 = 330 * 60000;
   var streakDays  = new Set(entries.map(function(e){
     if (!e.created_at) return "";
-    // slice(0,10) works for "2026-03-30T..." AND "2026-03-30 ..." (space separator from PostgreSQL)
-    var raw = (e.created_at).slice(0,10);
-    if (raw.length < 10) return "";
-    // Apply IST to get correct calendar date
     var ts = new Date(e.created_at.replace(" ", "T") + (e.created_at.includes("T") ? "" : "Z")).getTime();
     return new Date(ts + IST_MS2).toISOString().slice(0,10);
   }).filter(function(d){ return d.length === 10; })).size;
 
-  // Group by month
   var groups = {};
   var IST_GRP = 330 * 60000;
   filtered.forEach(function(e){
@@ -422,7 +396,6 @@ function Journal({ user }) {
         .j-input::placeholder{color:var(--muted)!important;}
       `}</style>
 
-      {/* Header */}
       <div style={{ marginBottom:"16px" }}>
         <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:"4px" }}>
           <div>
@@ -436,15 +409,12 @@ function Journal({ user }) {
             ✍️ Write
           </button>
         </div>
-
-        {/* Privacy badge */}
         <div style={{ display:"inline-flex", alignItems:"center", gap:"5px", background:"rgba(74,222,128,0.08)", border:"1px solid rgba(74,222,128,0.2)", borderRadius:"8px", padding:"4px 10px", marginTop:"4px" }}>
           <span style={{ fontSize:"10px" }}>🔒</span>
           <span style={{ fontSize:"10px", color:"#4ade80", fontWeight:"700", fontFamily:"'Syne',sans-serif" }}>Private & Secure — only you can read this</span>
         </div>
       </div>
 
-      {/* Stats row */}
       {entries.length > 0 && (
         <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"8px", marginBottom:"14px" }}>
           {[
@@ -463,7 +433,6 @@ function Journal({ user }) {
         </div>
       )}
 
-      {/* Mood streak */}
       {entries.length > 0 && (
         <div style={{ background:"var(--card)", border:"1px solid var(--border)", borderRadius:"14px", padding:"12px 14px", marginBottom:"14px" }}>
           <div style={{ fontSize:"9px", color:"var(--muted)", fontFamily:"'Syne',sans-serif", fontWeight:"800", letterSpacing:"0.1em", marginBottom:"8px" }}>THIS WEEK'S MOOD STREAK</div>
@@ -471,7 +440,6 @@ function Journal({ user }) {
         </div>
       )}
 
-      {/* Search + Filters */}
       {entries.length > 0 && (
         <div style={{ marginBottom:"12px", display:"flex", flexDirection:"column", gap:"8px" }}>
           <input
@@ -500,7 +468,6 @@ function Journal({ user }) {
               {sortDir==="desc"?"↓ Newest":"↑ Oldest"}
             </button>
           </div>
-          {/* Tag filter */}
           <div style={{ display:"flex", gap:"5px", flexWrap:"wrap" }}>
             {TAGS.map(function(t){
               var sel = filterTag===t;
@@ -515,7 +482,6 @@ function Journal({ user }) {
         </div>
       )}
 
-      {/* Entries */}
       {loading ? (
         <div style={{ textAlign:"center", padding:"40px", color:"var(--muted)", fontSize:"13px" }}>Loading your journal...</div>
       ) : filtered.length === 0 && entries.length === 0 ? (
@@ -552,7 +518,6 @@ function Journal({ user }) {
         })
       )}
 
-      {/* Write modal */}
       {showWrite && (
         <WriteModal
           user={user}

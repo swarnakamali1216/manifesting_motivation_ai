@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import axios from "axios";
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 
 // ── Mini flying butterfly ─────────────────────────────────────────────────
 function FloatingButterfly({ x, y, size, delay }) {

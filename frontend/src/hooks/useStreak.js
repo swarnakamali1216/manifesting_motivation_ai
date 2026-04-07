@@ -10,7 +10,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 
 export function useStreak(user) {
   var userId = user ? (user.id || 1) : 1;

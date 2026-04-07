@@ -5,7 +5,7 @@ function GoalCard({ goal, onUpdate, onMilestone }) {
 
   const completeGoal = async () => {
     try {
-      const res = await axios.patch(`http://localhost:5000/api/goals/${goal.id}/complete`);
+      const res = await axios.patch(`https://manifesting-motivation-backend.onrender.com/api/goals/${goal.id}/complete`);
       if (res.data.milestone && onMilestone) {
         onMilestone(res.data.milestone);
       }
@@ -16,7 +16,7 @@ function GoalCard({ goal, onUpdate, onMilestone }) {
   const deleteGoal = async () => {
     if (!window.confirm("Delete this goal?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/goals/${goal.id}`);
+      await axios.delete(`https://manifesting-motivation-backend.onrender.com/api/goals/${goal.id}`);
       onUpdate();
     } catch(err) { alert("Error deleting!"); }
   };

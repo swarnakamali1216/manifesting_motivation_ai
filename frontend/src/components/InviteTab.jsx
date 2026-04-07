@@ -4,7 +4,7 @@
  */
 import React, { useState } from "react";
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 
 // ── Butterfly SVG ────────────────────────────────────────────────────────────
 function ButterflyLogo({ size }) {

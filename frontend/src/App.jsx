@@ -19,7 +19,7 @@ import CheckIn        from "./pages/CheckIn";
 import LandingPage    from "./pages/LandingPage";
 import Onboarding     from "./components/Onboarding";
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 delete axios.defaults.headers.common["X-Requested-With"];
 
 var PAGE_MAP = {

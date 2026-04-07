@@ -67,7 +67,7 @@ function IntakeInterview(props) {
       // All answered — generate adaptive roadmap
       setLoading(true);
       try {
-        var res = await axios.post("http://localhost:5000/api/adaptive/interview", {
+        var res = await axios.post("https://manifesting-motivation-backend.onrender.com/api/adaptive/interview", {
           goal_id:       goalId,
           user_id:       userId,
           daily_time:    answers.daily_time,

@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 var POS_EMOTIONS = ["positive","excited","hopeful","focused"];
 var NEG_EMOTIONS = ["negative","sad","stressed","anxious","concerned"];
 var ECOL = {

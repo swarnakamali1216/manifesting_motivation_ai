@@ -13,7 +13,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { getLevelNum, getLevelName, getLevelEmoji, getXP, formatXP } from "../utils/gamificationHelpers";
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 
 var CATEGORY_LABELS = {
   journey:"Journey", streaks:"Streaks", goals:"Goals",

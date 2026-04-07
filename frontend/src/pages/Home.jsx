@@ -8,7 +8,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 var IST = 330;
 
 var EMOTION_COLORS = {

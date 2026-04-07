@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 
-var API = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+var API = process.env.REACT_APP_API_URL || "https://manifesting-motivation-backend.onrender.com/api";
 
 var MOODS = [
   { key:"amazing",  emoji:"🌟", label:"Amazing",   color:"#fbbf24", bg:"rgba(251,191,36,0.12)"  },

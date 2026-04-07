@@ -12,7 +12,7 @@ import {
   PieChart, Pie, Cell, Legend, LineChart, Line, AreaChart, Area,
 } from "recharts";
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 
 // ── Level name map — matches gamification.py exactly ─────────────────────────
 var LEVELS_MAP = {

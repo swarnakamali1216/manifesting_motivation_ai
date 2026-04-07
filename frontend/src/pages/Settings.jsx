@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 
 var ACCENT_COLORS = [
   { name:"purple", label:"Purple", hex:"#7c5cfc" },

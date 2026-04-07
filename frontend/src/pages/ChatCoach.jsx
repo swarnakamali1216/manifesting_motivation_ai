@@ -7,7 +7,7 @@ import { Send, Loader, Volume2, Square } from 'lucide-react';
 import VoiceInput from '../components/VoiceInput';
 import { useToast } from '../components/ToastSystem';
 
-var API = 'http://localhost:5000/api';
+var API = 'https://manifesting-motivation-backend.onrender.com/api';
 
 var EMOTION_COLORS = {
   positive:'#4ade80', excited:'#fb923c', focused:'#a78bfa',

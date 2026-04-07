@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 
 var EMO = {
   positive:  { emoji:"😊", color:"#4ade80", bg:"rgba(74,222,128,0.1)"   },

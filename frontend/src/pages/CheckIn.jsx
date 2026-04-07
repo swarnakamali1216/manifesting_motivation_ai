@@ -37,7 +37,7 @@ function ButterflyMini({ size }) {
 
 
 
-var API = "http://localhost:5000/api";
+var API = "https://manifesting-motivation-backend.onrender.com/api";
 
 var MOODS = [
   { id:"amazing",   label:"Amazing",   emoji:"🤩", color:"#fbbf24", energy:5 },

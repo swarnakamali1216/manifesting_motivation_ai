@@ -1,314 +1,336 @@
 """
-INVITE LINK FIX — invite.py
-
-THE PROBLEM:
-  Your .env has: APP_URL=http://localhost:3000
-  So invite emails send: http://localhost:3000?ref=3
-  When your friend clicks it → "This site cannot be reached" ✗
-  Because "localhost" = YOUR OWN computer. Not the internet.
-
-THE SOLUTION (choose one):
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OPTION A: Use ngrok (free, works right now, 5 minutes)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ngrok creates a public URL that tunnels to your localhost.
-
-Step 1: Download ngrok → https://ngrok.com/download
-Step 2: Run in a new terminal:
-    ngrok http 3000
-
-Step 3: ngrok gives you a URL like:
-    https://abc123.ngrok-free.app
-
-Step 4: Update backend/.env:
-    APP_URL=https://abc123.ngrok-free.app
-
-Step 5: Restart Flask (python app.py)
-
-Step 6: NOW send the invite — the link will work for anyone!
-
-Note: Free ngrok URL changes every time you restart ngrok.
-      For permanent URL, use ngrok paid plan or deploy to a server.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OPTION B: Deploy to the internet (permanent solution)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Deploy your app to a server so it has a real URL.
-Options: Railway, Render, Heroku, DigitalOcean, AWS.
-Once deployed: APP_URL=https://your-real-domain.com
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-The invite.py code below is UNCHANGED from the last version.
-Only your APP_URL in .env needs to change.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+routes/invite.py — REDESIGNED
+- Allow multiple invites to same email address (no duplicate block)
+- Beautiful HTML email with butterfly SVG logo + graphic design
+Place at: backend/routes/invite.py
 """
+import os
 from flask import Blueprint, request, jsonify
-from models import SessionLocal
-from sqlalchemy import text as sql_text
-import os, smtplib, ssl, traceback
+import smtplib, ssl, os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from models import SessionLocal
+from sqlalchemy import text as sql_text
+from dotenv import load_dotenv
+load_dotenv()
 
 invite_bp = Blueprint("invite", __name__)
 
-SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-_raw      = os.environ.get("SMTP_PASS","") or os.environ.get("SMTP_PASSWORD","")
-SMTP_PASSWORD = _raw.replace(" ","")
-APP_URL  = os.environ.get("APP_URL", "http://localhost:3000")
-APP_NAME = "Manifesting Motivation"
-
-print(f"📧 INVITE: user={SMTP_USER or 'NOT SET'} | pass={'SET' if SMTP_PASSWORD else 'NOT SET'} | test=http://localhost:5000/api/invite/test-smtp")
-print(f"🌐 APP_URL = {APP_URL}  ← must be a public URL for invites to work")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USER = os.getenv("SMTP_USER", "").strip()
+SMTP_PASS = os.getenv("SMTP_PASS", "").replace(" ", "").strip()
 
 
-def build_html(from_name: str, invite_url: str) -> str:
+def get_sender(user_id):
+    try:
+        db = SessionLocal()
+        row = db.execute(
+            sql_text("SELECT name, email FROM users WHERE id=:uid"),
+            {"uid": user_id}
+        ).fetchone()
+        db.close()
+        if row:
+            return row.name or "Someone", row.email or ""
+    except Exception as e:
+        print(f"[invite] get_sender error: {e}")
+    return "Someone", ""
+
+
+def build_email_html(sender_name, sender_email, invite_url):
+    """
+    Builds a beautiful branded HTML email with butterfly SVG logo.
+    Designed to look professional — like a real product invite.
+    """
     features = [
-        ("✓", f"<strong style='color:#4ade80;'>+25 XP</strong> free just for joining — instant head start"),
-        ("✓", "AI coach available <strong style='color:#ffffff;'>24/7</strong> — career, fitness, mindset, anything"),
-        ("✓", "50 badges to earn · 15 levels to unlock · real gamification"),
-        ("✓", f"<strong style='color:#a78bfa;'>{from_name}</strong> earns +50 XP when you join ⚡"),
+        ("🤖", "AI coach that adapts to your emotions"),
+        ("🎯", "Personalised goal roadmaps, step by step"),
+        ("📔", "Encrypted journal with AI emotional insight"),
+        ("✅", "Daily check-ins with streaks & XP"),
+        ("🏆", "Badges, levels, and gamified growth"),
     ]
-    feature_rows = "".join([f"""
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:10px;">
+    rows = "".join(
+        f'<tr><td style="padding:8px 0;font-size:14px;color:#c4b5fd;line-height:1.5;">'
+        f'<span style="font-size:18px;vertical-align:middle;">{i}</span>'
+        f'&nbsp;&nbsp;<span style="vertical-align:middle;">{t}</span></td></tr>'
+        for i, t in features
+    )
+
+    # Inline butterfly SVG as data URI for email clients that support it
+    butterfly_svg = """
+<svg width="48" height="48" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M20 20 C16 14,6 10,4 16 C2 22,10 26,20 20Z" fill="#c4b5fd" opacity="0.92"/>
+  <path d="M20 20 C24 14,34 10,36 16 C38 22,30 26,20 20Z" fill="#f9a8d4" opacity="0.92"/>
+  <path d="M20 20 C15 24,6 26,5 32 C4 36,12 36,20 20Z" fill="#a78bfa" opacity="0.85"/>
+  <path d="M20 20 C25 24,34 26,35 32 C36 36,28 36,20 20Z" fill="#f9a8d4" opacity="0.85"/>
+  <ellipse cx="20" cy="20" rx="1.2" ry="6" fill="white" opacity="0.9"/>
+  <line x1="20" y1="15" x2="16" y2="9" stroke="white" stroke-width="1.1" stroke-linecap="round" opacity="0.85"/>
+  <line x1="20" y1="15" x2="24" y2="9" stroke="white" stroke-width="1.1" stroke-linecap="round" opacity="0.85"/>
+  <circle cx="16" cy="9" r="1.2" fill="white" opacity="0.9"/>
+  <circle cx="24" cy="9" r="1.2" fill="white" opacity="0.9"/>
+</svg>"""
+
+    sender_display = f"{sender_name} ({sender_email})" if sender_email else sender_name
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>You've been invited to Manifesting Motivation AI</title>
+</head>
+<body style="margin:0;padding:0;background:#0a0a1a;font-family:'Segoe UI',Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+
+  <!-- Outer wrapper -->
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a1a;padding:32px 16px;">
+  <tr><td align="center">
+
+    <!-- Card -->
+    <table width="560" cellpadding="0" cellspacing="0"
+      style="background:#0f0f20;border-radius:24px;overflow:hidden;
+             border:1px solid #1a1a35;
+             box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+
+      <!-- HERO HEADER with gradient -->
       <tr>
-        <td style="width:28px;vertical-align:middle;">
-          <span style="display:inline-block;width:20px;height:20px;background:rgba(74,222,128,0.18);border-radius:50%;text-align:center;line-height:20px;font-size:10px;color:#4ade80;font-weight:800;">{icon}</span>
-        </td>
-        <td style="padding-left:10px;vertical-align:middle;">
-          <span style="font-size:14px;color:#d0cde8;line-height:1.5;">{text}</span>
+        <td style="background:linear-gradient(135deg,#1a0a3a 0%,#2d0a4a 50%,#1a0a3a 100%);
+                   padding:44px 40px 36px;text-align:center;
+                   border-bottom:1px solid rgba(124,92,252,0.3);">
+
+          <!-- Butterfly logo circle -->
+          <div style="display:inline-flex;align-items:center;justify-content:center;
+                      width:72px;height:72px;border-radius:20px;margin-bottom:18px;
+                      background:rgba(255,255,255,0.06);
+                      border:1.5px solid rgba(255,255,255,0.12);
+                      box-shadow:0 8px 32px rgba(124,92,252,0.4);">
+            {butterfly_svg}
+          </div>
+
+          <h1 style="color:#ffffff;margin:0 0 6px;font-size:26px;font-weight:800;
+                     letter-spacing:-0.5px;line-height:1.2;">
+            Manifesting Motivation
+          </h1>
+          <p style="color:rgba(196,181,253,0.85);margin:0;font-size:13px;
+                    letter-spacing:0.08em;text-transform:uppercase;font-weight:600;">
+            AI Coaching Platform
+          </p>
+
+          <!-- Decorative dots -->
+          <div style="margin-top:20px;display:flex;justify-content:center;gap:6px;align-items:center;">
+            <div style="width:6px;height:6px;border-radius:50%;background:#7c5cfc;opacity:0.8;"></div>
+            <div style="width:4px;height:4px;border-radius:50%;background:#a78bfa;opacity:0.5;"></div>
+            <div style="width:3px;height:3px;border-radius:50%;background:#c4b5fd;opacity:0.3;"></div>
+          </div>
         </td>
       </tr>
-    </table>""" for icon, text in features])
 
-    stats = [("🏆","50","#fbbf24","Badges"),("⚡","15","#a78bfa","Levels"),("🤖","24/7","#4ade80","AI Coach")]
-    stat_cells = "".join([f"""
-    <td style="text-align:center;padding:16px 10px;background:rgba(255,255,255,0.04);border-radius:12px;">
-      <div style="font-size:20px;margin-bottom:5px;">{emoji}</div>
-      <div style="font-size:20px;font-weight:800;color:{color};line-height:1;">{stat}</div>
-      <div style="font-size:9px;color:rgba(255,255,255,0.35);margin-top:4px;text-transform:uppercase;letter-spacing:0.08em;">{label}</div>
-    </td>
-    {"<td style='width:8px;'></td>" if i < 2 else ""}
-    """ for i,(emoji,stat,color,label) in enumerate(stats)])
+      <!-- BODY -->
+      <tr>
+        <td style="padding:36px 40px;">
 
-    return f"""<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>{from_name} invited you to {APP_NAME}</title></head>
-<body style="margin:0;padding:0;background:#080816;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#080816;padding:40px 16px;">
-<tr><td align="center">
-<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:linear-gradient(160deg,#13122a 0%,#190f38 100%);border-radius:24px;overflow:hidden;border:1px solid rgba(124,92,252,0.3);box-shadow:0 40px 80px rgba(0,0,0,0.6);">
-  <tr><td style="height:3px;background:linear-gradient(90deg,#7c5cfc,#fc5cf0,#60a5fa);"></td></tr>
-  <tr><td style="padding:44px 40px 32px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.06);">
-    <h1 style="margin:0 0 8px;font-size:28px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;line-height:1.2;">{APP_NAME}</h1>
-    <p style="margin:0;font-size:12px;color:rgba(255,255,255,0.4);letter-spacing:0.1em;text-transform:uppercase;">AI Coaching Platform</p>
-  </td></tr>
-  <tr><td style="padding:36px 40px 24px;">
-    <p style="margin:0 0 8px;font-size:18px;font-weight:700;color:#ffffff;">Hey there! 👋</p>
-    <p style="margin:0 0 28px;font-size:15px;color:rgba(255,255,255,0.65);line-height:1.75;">
-      <strong style="color:#a78bfa;">{from_name}</strong> just invited you to join <strong style="color:#ffffff;">{APP_NAME}</strong> — an AI that coaches you through goals, tracks your mood, and helps you grow every single day.
-    </p>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:rgba(124,92,252,0.07);border:1px solid rgba(124,92,252,0.2);border-radius:16px;margin-bottom:32px;">
-      <tr><td style="padding:22px 24px;">
-        <p style="margin:0 0 16px;font-size:11px;font-weight:700;color:#a78bfa;letter-spacing:0.12em;text-transform:uppercase;">🎁 Your welcome package</p>
-        {feature_rows}
-      </td></tr>
+          <!-- Invitation message -->
+          <p style="font-size:22px;font-weight:700;color:#eeeeff;margin:0 0 10px;line-height:1.3;">
+            You've been invited 🦋
+          </p>
+          <p style="color:#9898c0;font-size:15px;line-height:1.75;margin:0 0 24px;">
+            <span style="color:#c4b5fd;font-weight:600;">{sender_name}</span>
+            {f'<span style="color:#6060a0;font-size:13px;"> &lt;{sender_email}&gt;</span>' if sender_email else ''}
+            wants you to join them on
+            <span style="color:#eeeeff;font-weight:600;">Manifesting Motivation AI</span>
+            — a personal growth app that helps you set goals, track your mood,
+            and get real AI coaching.
+          </p>
+
+          <!-- Feature list -->
+          <table width="100%" cellpadding="0" cellspacing="0"
+            style="background:rgba(124,92,252,0.06);border-radius:16px;
+                   border:1px solid rgba(124,92,252,0.18);padding:4px;
+                   margin-bottom:28px;">
+            <tr><td style="padding:16px 20px 4px;">
+              <div style="font-size:10px;font-weight:700;color:#7c5cfc;
+                          letter-spacing:0.12em;margin-bottom:10px;">
+                WHAT YOU GET
+              </div>
+            </td></tr>
+            {rows}
+            <tr><td style="padding:4px 20px 16px;"></td></tr>
+          </table>
+
+          <!-- CTA Button -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+            <tr><td align="center">
+              <a href="{invite_url}"
+                style="display:inline-block;padding:16px 52px;
+                       background:linear-gradient(135deg,#7c5cfc,#9c7cfc);
+                       color:#ffffff;border-radius:100px;text-decoration:none;
+                       font-size:16px;font-weight:700;letter-spacing:0.02em;
+                       box-shadow:0 8px 32px rgba(124,92,252,0.5);
+                       border:1px solid rgba(255,255,255,0.1);">
+                Join Free — Start Your Journey ✨
+              </a>
+            </td></tr>
+          </table>
+
+          <!-- URL fallback -->
+          <p style="text-align:center;color:#4a4a6a;font-size:11px;margin:0 0 24px;line-height:1.8;">
+            Or copy this link into your browser:<br/>
+            <a href="{invite_url}" style="color:#7c5cfc;text-decoration:none;
+               font-size:11px;word-break:break-all;">{invite_url}</a>
+          </p>
+
+          <!-- Divider -->
+          <div style="height:1px;background:linear-gradient(90deg,transparent,#1a1a35,transparent);
+                      margin:0 0 20px;"></div>
+
+          <!-- XP reward notice -->
+          <div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);
+                      border-radius:12px;padding:14px 18px;display:flex;align-items:center;">
+            <span style="font-size:20px;margin-right:12px;">⚡</span>
+            <div>
+              <p style="color:#4ade80;font-size:13px;font-weight:700;margin:0 0 2px;">
+                Welcome bonus: +25 XP when you sign up
+              </p>
+              <p style="color:#6060a0;font-size:11px;margin:0;">
+                {sender_name} earns +50 XP when you join
+              </p>
+            </div>
+          </div>
+        </td>
+      </tr>
+
+      <!-- FOOTER -->
+      <tr>
+        <td style="background:#070712;padding:20px 40px;
+                   border-top:1px solid #1a1a35;text-align:center;">
+          <p style="color:#3a3a5a;font-size:11px;margin:0 0 6px;line-height:1.8;">
+            Invited by <span style="color:#6060a0;">{sender_display}</span>
+          </p>
+          <p style="color:#2a2a42;font-size:10px;margin:0;line-height:1.8;">
+            Manifesting Motivation AI · Built with 🦋 in India<br/>
+            This invite was sent on their behalf. Not interested?
+            Simply ignore this email.
+          </p>
+        </td>
+      </tr>
+
     </table>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
-      <tr><td style="text-align:center;">
-        <a href="{invite_url}" style="display:inline-block;padding:17px 52px;background:linear-gradient(135deg,#7c5cfc 0%,#9c6cfc 100%);color:#ffffff;text-decoration:none;border-radius:100px;font-weight:700;font-size:16px;box-shadow:0 12px 40px rgba(124,92,252,0.5);">
-          🚀 &nbsp;Join Free Now
-        </a>
-        <p style="margin:12px 0 0;font-size:11px;color:rgba(255,255,255,0.3);">No credit card · Free forever</p>
-      </td></tr>
-    </table>
-    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:0 0 20px;">
-    <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.3);text-align:center;line-height:1.8;">
-      Or copy this link:<br>
-      <a href="{invite_url}" style="color:#7c5cfc;word-break:break-all;font-size:11px;">{invite_url}</a>
-    </p>
+    <!-- End card -->
+
   </td></tr>
-  <tr><td style="padding:0 40px 32px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-      <tr>{stat_cells}</tr>
-    </table>
-  </td></tr>
-  <tr><td style="padding:20px 40px;border-top:1px solid rgba(255,255,255,0.06);text-align:center;">
-    <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.2);line-height:1.8;">
-      Sent by <strong style="color:rgba(255,255,255,0.35);">{from_name}</strong> via {APP_NAME}<br>
-      You received this because your friend wanted to share something they love 💜
-    </p>
-  </td></tr>
-  <tr><td style="height:3px;background:linear-gradient(90deg,#60a5fa,#7c5cfc,#fc5cf0);"></td></tr>
-</table>
-</td></tr></table>
-</body></html>"""
+  </table>
+  <!-- End outer -->
+
+</body>
+</html>"""
+    return html
 
 
-def send_email(to_email: str, from_name: str, ref_code: str):
-    if not SMTP_USER:
-        return False, "SMTP_USER not set in .env"
-    if not SMTP_PASSWORD:
-        return False, "SMTP_PASS not set in .env"
-
-    invite_url = f"{APP_URL}?ref={ref_code}"
-
-    # Warn if still localhost
-    if "localhost" in APP_URL or "127.0.0.1" in APP_URL:
-        print(f"⚠️  WARNING: APP_URL={APP_URL} — invite links won't work for external users!")
-        print("   Run: ngrok http 3000  →  copy the URL  →  set APP_URL=https://xxx.ngrok-free.app in .env")
-
-    html_body  = build_html(from_name, invite_url)
-    text_body  = f"Hey! {from_name} invited you to {APP_NAME}.\nJoin free: {invite_url}"
-
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"✨ {from_name} invited you to {APP_NAME}"
-        msg["From"]    = f"{from_name} via {APP_NAME} <{SMTP_USER}>"
-        msg["To"]      = to_email
-        msg.attach(MIMEText(text_body, "plain", "utf-8"))
-        msg.attach(MIMEText(html_body, "html",  "utf-8"))
-
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=20) as s:
-            s.login(SMTP_USER, SMTP_PASSWORD)
-            s.sendmail(SMTP_USER, to_email, msg.as_string())
-
-        print(f"✅ Invite sent: {SMTP_USER} → {to_email} | URL: {invite_url}")
-        return True, None
-
-    except Exception as e:
-        print(f"❌ Email error: {e}")
-        return False, str(e)
-
-
-@invite_bp.route("/invite/test-smtp", methods=["GET"])
-def test_smtp():
-    conn_ok, conn_err = False, None
-    issues = []
-    if not SMTP_USER: issues.append("SMTP_USER missing")
-    if not SMTP_PASSWORD: issues.append("SMTP_PASS missing")
-    if "localhost" in APP_URL: issues.append(f"APP_URL={APP_URL} — invite links won't work externally! Use ngrok.")
-    if SMTP_USER and SMTP_PASSWORD:
-        try:
-            ctx = ssl.create_default_context()
-            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=10) as s:
-                s.login(SMTP_USER, SMTP_PASSWORD); conn_ok = True
-        except Exception as e: conn_err = str(e)
-    return jsonify({
-        "status":         "READY ✅" if conn_ok else "BROKEN ❌",
-        "smtp_user":      SMTP_USER or "NOT SET",
-        "app_url":        APP_URL,
-        "invite_url_ok":  "localhost" not in APP_URL,
-        "connection_ok":  conn_ok,
-        "connection_err": conn_err,
-        "config_issues":  issues,
-        "fix_invite_url": "Run: ngrok http 3000  →  set APP_URL=https://xxx.ngrok-free.app in backend/.env",
-    })
-
-
-@invite_bp.route("/invite/send", methods=["POST"])
+@invite_bp.route("/invite/email", methods=["POST"])
 def send_invite():
-    db   = SessionLocal()
-    data = request.get_json() or {}
-    user_id      = data.get("user_id")
-    friend_email = (data.get("email") or "").strip().lower()
+    """
+    Allows multiple invites to same email.
+    Records each invite in DB for XP tracking.
+    """
+    data     = request.get_json() or {}
+    to_email = (data.get("to_email") or "").strip()
+    user_id  = data.get("user_id")
 
-    if not friend_email or "@" not in friend_email:
-        return jsonify({"error": "Please enter a valid email address."}), 400
+    if not to_email or "@" not in to_email:
+        return jsonify({"error": "Enter a valid email address"}), 400
     if not user_id:
-        return jsonify({"error": "You must be logged in."}), 401
+        return jsonify({"error": "user_id required"}), 400
+    if not SMTP_USER or not SMTP_PASS:
+        return jsonify({"error": "SMTP not configured in .env"}), 500
+
+    sender_name, sender_email = get_sender(user_id)
+    # APP_URL should be set in .env for production (e.g. https://yourdomain.com)
+    # Falls back to localhost:3000 for local development
+    app_url = os.getenv("APP_URL", "http://localhost:3000/").rstrip("/")
+    invite_url = f"{app_url}?ref={user_id}"
+
+    # Build email
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"🦋 {sender_name} invited you to Manifesting Motivation AI"
+    if sender_email:
+        msg["From"]     = f"{sender_name} <{sender_email}>"
+        msg["Reply-To"] = f"{sender_name} <{sender_email}>"
+    else:
+        msg["From"] = f"{sender_name} via Manifesting Motivation <{SMTP_USER}>"
+    msg["To"]     = to_email
+    msg["Sender"] = f"Manifesting Motivation <{SMTP_USER}>"
+
+    html = build_email_html(sender_name, sender_email, invite_url)
+    msg.attach(MIMEText(html, "html"))
 
     try:
-        user_row = db.execute(sql_text("SELECT id, name, email FROM users WHERE id=:uid"), {"uid":int(user_id)}).fetchone()
-        if not user_row: return jsonify({"error":"User not found."}), 404
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx) as server:
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, to_email, msg.as_string())
 
-        sender_name = user_row[1] or "A friend"
-        ref_code    = str(user_row[0])
-        invite_url  = f"{APP_URL}?ref={ref_code}"
-
+        # Record invite in DB — allow duplicates (no unique constraint)
         try:
-            ex = db.execute(sql_text("SELECT id FROM invites WHERE inviter_id=:uid AND invited_email=:e"),{"uid":int(user_id),"e":friend_email}).fetchone()
-            if ex: return jsonify({"error":f"You already invited {friend_email}."}), 400
-        except Exception: pass
-
-        try:
-            db.execute(sql_text("INSERT INTO invites (inviter_id,invited_email,created_at,status) VALUES (:uid,:e,NOW(),'pending')"),{"uid":int(user_id),"e":friend_email})
+            db = SessionLocal()
+            db.execute(sql_text(
+                "INSERT INTO invites (inviter_id, to_email, status, created_at) "
+                "VALUES (:uid, :email, 'sent', NOW())"
+            ), {"uid": int(user_id), "email": to_email})
             db.commit()
-        except Exception:
-            try: db.rollback()
-            except: pass
-            try:
-                db.execute(sql_text("CREATE TABLE IF NOT EXISTS invites (id SERIAL PRIMARY KEY, inviter_id INTEGER NOT NULL, invited_email TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW(), status TEXT DEFAULT 'pending', UNIQUE(inviter_id,invited_email))"))
-                db.execute(sql_text("INSERT INTO invites (inviter_id,invited_email,created_at,status) VALUES (:uid,:e,NOW(),'pending')"),{"uid":int(user_id),"e":friend_email})
-                db.commit()
-            except Exception as e2:
-                try: db.rollback()
-                except: pass
+            db.close()
+        except Exception as db_err:
+            print(f"[invite] DB record skipped: {db_err}")
 
-        ok, err = send_email(friend_email, sender_name, ref_code)
-        if ok:
-            localhost_warning = "localhost" in APP_URL
-            return jsonify({
-                "success":    True,
-                "email_sent": True,
-                "message":    f"Invite sent to {friend_email}! 🎉" + (" ⚠️ But the link goes to localhost — use ngrok so they can actually open it!" if localhost_warning else " You'll earn +50 XP when they join."),
-                "invite_url": invite_url,
-                "localhost_warning": localhost_warning,
-            })
-        else:
-            return jsonify({"success":True,"email_sent":False,"message":"Invite saved but email failed.","invite_url":invite_url,"debug":err})
+        print(f"[invite] ✅ {sender_name} → {to_email}")
+        return jsonify({
+            "success": True,
+            "message": f"Invite sent to {to_email} ✅",
+            "from":    sender_email or SMTP_USER,
+            "to":      to_email
+        })
 
+    except smtplib.SMTPAuthenticationError:
+        return jsonify({"error": "Gmail App Password wrong. Check SMTP_PASS in .env"}), 401
+    except smtplib.SMTPRecipientsRefused:
+        return jsonify({"error": f"Invalid recipient email: {to_email}"}), 400
     except Exception as e:
-        try: db.rollback()
-        except: pass
-        return jsonify({"error":str(e)}), 500
-    finally:
-        db.close()
+        print(f"[invite] ❌ {e}")
+        return jsonify({"error": str(e)}), 500
 
+
+@invite_bp.route("/invite/test", methods=["GET"])
+def test_config():
+    configured = bool(SMTP_USER and SMTP_PASS)
+    return jsonify({
+        "configured":  configured,
+        "smtp_user":   SMTP_USER[:10] + "***" if SMTP_USER else "NOT SET",
+        "pass_length": len(SMTP_PASS),
+        "message":     "Ready ✅" if configured else "Add SMTP_USER + SMTP_PASS to .env"
+    })
 
 @invite_bp.route("/invite/link/<int:user_id>", methods=["GET"])
 def get_invite_link(user_id):
-    return jsonify({"link":f"{APP_URL}?ref={user_id}","ref_code":str(user_id),"localhost_warning":"localhost" in APP_URL})
+    """Return the invite link for a user."""
+    link = f"http://localhost:3000/?ref={user_id}&mode=signup"
+    return jsonify({"link": link, "user_id": user_id})
 
 
 @invite_bp.route("/invite/stats/<int:user_id>", methods=["GET"])
-def invite_stats(user_id):
+def get_invite_stats(user_id):
+    """Return how many people this user has invited."""
     db = SessionLocal()
     try:
-        total=joined=0
-        try:
-            r=db.execute(sql_text("SELECT COUNT(*) FROM invites WHERE inviter_id=:uid"),{"uid":user_id}).fetchone(); total=r[0] if r else 0
-        except Exception: pass
-        try:
-            r=db.execute(sql_text("SELECT COUNT(*) FROM invites WHERE inviter_id=:uid AND status='joined'"),{"uid":user_id}).fetchone(); joined=r[0] if r else 0
-        except Exception: pass
-        return jsonify({"total_invited":total,"joined":joined,"xp_earned":joined*50})
+        row = db.execute(sql_text(
+            "SELECT COUNT(*) FROM invites WHERE inviter_id=:uid"
+        ), {"uid": user_id}).fetchone()
+        count = row[0] if row else 0
+        return jsonify({"total_invites": count, "user_id": user_id, "xp_earned": count * 50})
     except Exception as e:
-        return jsonify({"error":str(e)}), 500
+        return jsonify({"total_invites": 0, "user_id": user_id, "xp_earned": 0})
     finally:
         db.close()
 
 
-@invite_bp.route("/invite/claim", methods=["POST"])
-def claim_invite():
-    db=SessionLocal(); data=request.get_json() or {}
-    new_user_id=data.get("new_user_id"); ref_code=data.get("ref_code")
-    if not ref_code or not new_user_id: return jsonify({"ok":False}), 400
-    try:
-        inv=int(ref_code)
-        db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+50 WHERE id=:uid"),{"uid":inv})
-        db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+25 WHERE id=:uid"),{"uid":int(new_user_id)})
-        try:
-            db.execute(sql_text("UPDATE invites SET status='joined' WHERE inviter_id=:inv AND invited_email=(SELECT email FROM users WHERE id=:nuid)"),{"inv":inv,"nuid":int(new_user_id)})
-        except Exception: pass
-        db.commit()
-        return jsonify({"ok":True})
-    except Exception as e:
-        try: db.rollback()
-        except: pass
-        return jsonify({"ok":False,"error":str(e)}), 500
-    finally:
-        db.close()
+@invite_bp.route("/invite/send", methods=["POST"])
+def send_invite_alias():
+    """Alias for /invite/email - some frontend versions call /invite/send."""
+    return send_invite()

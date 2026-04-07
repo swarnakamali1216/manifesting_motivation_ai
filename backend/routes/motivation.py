@@ -21,9 +21,7 @@ SELF_URL = "http://localhost:5000/api"
 def safe_str(val):
     return "" if val is None else str(val).strip()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CRISIS DETECTION — self-directed harm only
-# ─────────────────────────────────────────────────────────────────────────────
+# ── CRISIS DETECTION ─────────────────────────────────────────────────────────
 COLLOQUIAL_SAFE = [
     r"\b(kill|murder|destroy|hurt|strangle)\b.{0,40}\b(friend|teacher|boss|colleague|classmate|brother|sister|him|her|them|you|u|someone|everyone)\b",
     r"\bi (kill|wanna kill|want to kill|gonna kill) (u|you)\b",
@@ -35,8 +33,7 @@ CRISIS_PATTERNS = [
     r"\b(want to|going to|thinking of|about to|gonna|planning to)\b.{0,20}\b(kill|end|hurt|harm)\b.{0,12}\b(myself|my life)\b",
     r"\b(suicid(e|al|ing)|self.harm|self harm|cut myself|cutting myself|overdos(e|ing))\b",
     r"\b(want to die|wish i was dead|better off dead|no reason to live|not worth living)\b",
-    r"\b(end it all|end my life)\b",
-    r"\bkms\b",
+    r"\b(end it all|end my life)\b", r"\bkms\b",
     r"\b(starving myself|hurting myself|punishing myself)\b",
 ]
 SOFTER_DISTRESS = [
@@ -69,13 +66,8 @@ def check_content_safety(text):
     return False, False, None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# EXPANDED TOPIC DETECTION
-# Now detects ALL user question types, not just weather/news/date
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ── TOPIC DETECTION ──────────────────────────────────────────────────────────
 TOPIC_PATTERNS = {
-    # Real-time (needs live data)
     "weather":      [r"\b(weather|temperature|degree|celsius|hot|cold|climate|rain|humid|forecast|temp)\b",
                      r"\bhow (hot|cold|warm)\b", r"\bwhat.*(weather|temperature|degree)\b"],
     "news":         [r"\b(news|trending|latest|headline|current event|what.{0,10}happen)\b",
@@ -86,8 +78,6 @@ TOPIC_PATTERNS = {
     "capability":   [r"\bwhat.*based.*ai\b", r"\bwhat.*can.*do\b", r"\bwhat.*you.*do\b",
                      r"\bwho.*are.*you\b", r"\bwhat.*ai\b", r"\bwhat.*llm\b",
                      r"\bwhat.*model\b", r"\bhow.*work\b"],
-
-    # Knowledge topics (LLaMA handles natively — no API needed)
     "career":       [r"\b(career|job|interview|resume|cv|salary|promotion|workplace|profession|internship|placement|hire)\b",
                      r"\bhow to get.*(job|hired)\b", r"\b(linkedin|naukri|indeed)\b"],
     "academic":     [r"\b(study|exam|test|assignment|project|college|university|degree|marks|grade|jee|neet|upsc|gate|board)\b",
@@ -111,7 +101,6 @@ TOPIC_PATTERNS = {
 }
 
 def detect_topic(msg):
-    """Returns topic string or None. Checks all patterns."""
     low = msg.lower()
     for topic, patterns in TOPIC_PATTERNS.items():
         for p in patterns:
@@ -167,10 +156,7 @@ def get_user_context(db, user_id):
     return "\n".join(parts) if parts else "New user."
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SYSTEM PROMPTS
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ── SYSTEM PROMPTS ────────────────────────────────────────────────────────────
 BASE_RULES = """
 IDENTITY: You are the AI Coach for Manifesting Motivation — a caring friend who is also wise.
 LANGUAGE: Clear, warm English. Simple and genuine.
@@ -184,150 +170,43 @@ CORE RULES:
 - NEVER deflect — always give something useful.
 """
 
-# Topic-specific system prompts — each tells LLaMA exactly how to behave
 TOPIC_SYSTEM = {
-    "weather": BASE_RULES + """
-MODE: WEATHER
-If [LIVE WEATHER DATA] is provided below, use those exact numbers.
-Give the actual temperature, condition, and a brief comfort tip.
-If no live data: say you can't access live weather and suggest they check their phone weather app.""",
-
-    "news": BASE_RULES + """
-MODE: NEWS
-If [LIVE NEWS HEADLINES] are provided below, present them naturally.
-If no live data: say you can't fetch live news and direct to timesofindia.com, ndtv.com, bbc.com/news.
-NEVER invent headlines.""",
-
-    "datetime": BASE_RULES + """
-MODE: DATE AND TIME
-The [SYSTEM CONTEXT] block contains the EXACT current date, day and time from the user's device.
-Extract it and answer directly. Never guess.""",
-
-    "capability": BASE_RULES + """
-MODE: ABOUT THIS AI
-You are the Manifesting Motivation AI Coach, powered by Meta's LLaMA 3.3 70B via Groq API.
-You can: emotional coaching, goal roadmaps, habit advice, career guidance, study help, fitness plans, motivation.
-You cannot: browse the internet, diagnose medical conditions, give legal/financial advice, predict stock prices.
-Be honest and warm.""",
-
-    "career": BASE_RULES + """
-MODE: CAREER COACH
-You are an expert career mentor. Give specific, actionable advice.
-For job search: resume tips, interview prep, LinkedIn optimisation, networking.
-For roadmaps: specific skills to learn, in what order, with what resources.
-Be concrete — name actual tools, platforms, certifications.
-80-150 words. End with encouragement.""",
-
-    "academic": BASE_RULES + """
-MODE: ACADEMIC MENTOR
-You are an expert tutor. Explain concepts clearly with examples and analogies.
-For study plans: give specific techniques (Pomodoro, spaced repetition, active recall).
-For technical concepts: explain from first principles, use simple language first, then build up.
-For project ideas: give 2-3 specific ideas with tech stack and purpose.
-80-150 words. End with encouragement.""",
-
-    "health": BASE_RULES + """
-MODE: HEALTH COACH (NOT A DOCTOR)
-Give practical wellness advice for common symptoms (rest, hydration, basic remedies).
-ALWAYS end health responses with: "I'm a coach, not a doctor. If symptoms persist or are severe, please see a qualified doctor."
-NEVER diagnose conditions. NEVER prescribe specific medicines.
-For serious symptoms (chest pain, breathing issues, high fever): immediately say "Please see a doctor or call emergency services."
-Be warm and caring.""",
-
-    "fitness": BASE_RULES + """
-MODE: FITNESS COACH
-Give specific workout advice: exercise names, sets, reps, rest time.
-For beginners: start simple, bodyweight exercises, form tips.
-For weight loss: calorie deficit basics, compound movements, cardio.
-For muscle gain: progressive overload, protein intake, recovery.
-Always include a warm-up reminder and rest day advice.
-80-150 words. Encouraging and specific.""",
-
-    "mental": BASE_RULES + """
-MODE: MENTAL WELLNESS COACH (NOT A THERAPIST)
-Lead with genuine empathy. Make them feel less alone first.
-Give one practical technique (box breathing, grounding, journaling).
-For serious mental health concerns: recommend speaking with iCall (9152987821) or a counsellor.
-NEVER diagnose anxiety, depression, or other conditions.
-NEVER minimise what they're feeling.
-2-4 warm sentences.""",
-
-    "habits": BASE_RULES + """
-MODE: HABITS & PRODUCTIVITY COACH
-Draw on habit science (James Clear, BJ Fogg): habit stacking, identity-based habits, 2-minute rule.
-For routines: give specific time blocks and activities.
-For procrastination: explain the 5-second rule, body doubling, temptation bundling.
-For focus: Pomodoro technique, distraction audit, single-tasking.
-Specific and actionable. 80-150 words.""",
-
-    "finance": BASE_RULES + """
-MODE: FINANCIAL WELLNESS (NOT A FINANCIAL ADVISOR)
-Give general personal finance principles: budgeting, saving habits, emergency funds.
-For Indian users: mention SIP, PPF, NPS, EPF where relevant.
-NEVER recommend specific stocks, funds, or investment products.
-ALWAYS say: "I'm a coach, not a financial advisor — please consult a professional for investment decisions."
-Warm and practical.""",
-
-    "motivation": BASE_RULES + """
-MODE: MOTIVATIONAL COACH
-This person needs a genuine human moment, not a motivational poster.
-Acknowledge their struggle specifically. Don't minimise it.
-Share one truth that makes them feel less alone.
-Then give ONE practical next step — the smallest possible action.
-2-4 sentences. Real, warm, specific to what they said.""",
-
-    "food": BASE_RULES + """
-MODE: NUTRITION & DIET COACH
-Give practical meal planning advice based on goals.
-For weight loss: calorie deficit, protein focus, meal timing.
-For muscle gain: protein targets (1.6-2g per kg bodyweight), calorie surplus.
-For general health: whole foods, hydration, reducing processed food.
-Give specific meal ideas for Indian context (dal, rice, roti, vegetables).
-80-150 words. Practical and achievable.""",
-
-    "relationship": BASE_RULES + """
-MODE: RELATIONSHIP SUPPORT
-Lead with empathy. Relationships are complex — don't give simple fixes.
-For loneliness: validate it, suggest small steps to connect.
-For family issues: acknowledge the difficulty, suggest communication techniques.
-For friendships: offer perspective on maintaining relationships.
-NEVER take sides. Always acknowledge both perspectives exist.
-2-4 warm sentences.""",
-
-    "creativity": BASE_RULES + """
-MODE: CREATIVITY COACH
-Encourage and inspire. Help them find their creative path.
-Give specific techniques to overcome creative blocks.
-For side projects: suggest starting small, shipping imperfect work, finding community.
-Warm, enthusiastic, specific. 80-150 words.""",
+    "weather": BASE_RULES + "\nMODE: WEATHER\nIf [LIVE WEATHER DATA] is provided, use exact numbers. Give temperature, condition, comfort tip. If no live data: say you can't access live weather.",
+    "news": BASE_RULES + "\nMODE: NEWS\nIf [LIVE NEWS HEADLINES] are provided, present them naturally. If no live data: direct to timesofindia.com, ndtv.com. NEVER invent headlines.",
+    "datetime": BASE_RULES + "\nMODE: DATE AND TIME\nThe [SYSTEM CONTEXT] block has EXACT current date, day and time from user device. Extract it and answer directly. Never guess.",
+    "capability": BASE_RULES + "\nMODE: ABOUT THIS AI\nYou are Manifesting Motivation AI Coach, powered by LLaMA 3.3 70B via Groq. You can: emotional coaching, goal roadmaps, habit advice, career guidance, study help, fitness plans. Be honest and warm.",
+    "career": BASE_RULES + "\nMODE: CAREER COACH\nGive specific actionable advice. Resume tips, interview prep, LinkedIn. For roadmaps: name actual tools, platforms, certifications. 80-150 words. End with encouragement.",
+    "academic": BASE_RULES + "\nMODE: ACADEMIC MENTOR\nExplain concepts clearly with examples. For study plans: Pomodoro, spaced repetition, active recall. For project ideas: give 2-3 specific ideas with tech stack. 80-150 words.",
+    "health": BASE_RULES + "\nMODE: HEALTH COACH (NOT A DOCTOR)\nGive practical wellness advice. ALWAYS end with: 'I'm a coach, not a doctor. If symptoms persist, please see a qualified doctor.' NEVER diagnose. NEVER prescribe.",
+    "fitness": BASE_RULES + "\nMODE: FITNESS COACH\nGive specific workout advice: exercise names, sets, reps, rest time. Always include warm-up reminder. 80-150 words. Encouraging.",
+    "mental": BASE_RULES + "\nMODE: MENTAL WELLNESS (NOT A THERAPIST)\nLead with genuine empathy. Give one practical technique. For serious concerns: recommend iCall (9152987821). NEVER diagnose. 2-4 warm sentences.",
+    "habits": BASE_RULES + "\nMODE: HABITS COACH\nDraw on habit science: habit stacking, 2-minute rule. For procrastination: 5-second rule, body doubling. Specific and actionable. 80-150 words.",
+    "finance": BASE_RULES + "\nMODE: FINANCIAL WELLNESS (NOT A FINANCIAL ADVISOR)\nGeneral personal finance: budgeting, saving, emergency funds. For Indian users: mention SIP, PPF, NPS. NEVER recommend specific stocks. Say you're a coach not an advisor.",
+    "motivation": BASE_RULES + "\nMODE: MOTIVATIONAL COACH\nAcknowledge their struggle specifically. Share one truth that makes them feel less alone. Then give ONE practical next step — smallest possible action. 2-4 sentences.",
+    "food": BASE_RULES + "\nMODE: NUTRITION COACH\nPractical meal planning. For Indian context: dal, rice, roti, vegetables. Specific and achievable. 80-150 words.",
+    "relationship": BASE_RULES + "\nMODE: RELATIONSHIP SUPPORT\nLead with empathy. NEVER take sides. 2-4 warm sentences.",
+    "creativity": BASE_RULES + "\nMODE: CREATIVITY COACH\nEncourage and inspire. Specific techniques for creative blocks. Warm, enthusiastic. 80-150 words.",
 }
 
 EMOTIONAL_SYSTEM = BASE_RULES + """
 MODE: EMOTIONAL COACH
-Your only job right now: make this person feel genuinely heard and less alone.
-
-RULES:
-1. Read what they actually said — not what you expect them to say.
-2. Acknowledge their specific feeling in one warm, genuine sentence.
-   Good: "That kind of exhaustion where your mind won't stop — it's one of the hardest feelings to carry."
-   Bad: "It sounds like you're feeling stressed."
-3. Say something REAL that normalises their experience.
-4. Offer ONE concrete thing — comfort, a small step, or a question that opens space.
-5. Max 3-4 sentences. No bullet points. No lists. No deflection questions.
-
-BANNED: "It sounds like...", "I can hear that...", "That must be...", "I understand how..."
-BANNED: Responding to sadness with excitement or hype.
-BANNED: Giving a list of tips when someone needs to feel heard."""
+Your only job: make this person feel genuinely heard and less alone.
+1. Acknowledge their specific feeling in one warm genuine sentence.
+2. Say something REAL that normalises their experience.
+3. Offer ONE concrete thing — comfort, a small step, or a question.
+Max 3-4 sentences. No bullet points. No lists.
+BANNED: "It sounds like...", "I can hear that...", "That must be..."
+BANNED: Responding to sadness with excitement or hype."""
 
 ANSWER_SYSTEM = BASE_RULES + """
 MODE: KNOWLEDGE MENTOR
 Give real, specific, useful answers.
 - Project ideas: name 2-3 specific projects with tech stack
-- Roadmaps: clear phases in prose (no bullet points)  
+- Roadmaps: clear phases in prose (no bullet points)
 - Explanations: clear analogy first, then detail
 - 80-150 words. NO bullet lists. NO numbered lists.
 - End with one warm line of encouragement.
-- NEVER deflect. NEVER say "it depends". JUST ANSWER."""
+- NEVER deflect. JUST ANSWER."""
 
 PERSONA_SUFFIX = {
     "mentor":  "Wise, warm mentor. Honest and grounded. Max 4 sentences.",
@@ -339,14 +218,14 @@ PERSONA_SUFFIX = {
 
 EMOTION_INSTRUCTIONS = {
     "positive":   "They're happy. Match warmth with real celebration.",
-    "excited":    "CAREFUL: VADER scores loneliness as excited. Read the actual words. If lonely → respond with warmth.",
+    "excited":    "CAREFUL: VADER sometimes scores loneliness as excited. Read the actual words.",
     "focused":    "Task mode. Quick acknowledgment + one concrete next step.",
     "hopeful":    "Nurture it. Be specific and encouraging.",
     "neutral":    "READ THE CONTENT carefully — respond to what they actually said.",
     "stressed":   "Acknowledge first. Then ONE practical thing they can do right now.",
     "anxious":    "One steady grounding sentence. Make them feel less alone first.",
     "frustrated": "Validate the frustration FIRST. Then gently redirect energy.",
-    "sad":        "DO NOT motivate. DO NOT silver-line. Acknowledge how heavy this is. Make them feel less alone.",
+    "sad":        "DO NOT motivate. DO NOT silver-line. Acknowledge how heavy this is.",
     "negative":   "Dark, low place. No toxic positivity. Just honest, kind presence.",
 }
 
@@ -370,9 +249,7 @@ GRIEF_PATTERNS = [
 ]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN ROUTE
-# ─────────────────────────────────────────────────────────────────────────────
+# ── MAIN ROUTE ────────────────────────────────────────────────────────────────
 @motivation_bp.route("/motivate", methods=["POST"])
 def motivate():
     db   = SessionLocal()
@@ -388,12 +265,11 @@ def motivate():
         real_date_context = (
             f"[SYSTEM CONTEXT: Today is {now.strftime('%A')}, "
             f"{now.strftime('%d %B %Y')}. "
-            f"Current time: {now.strftime('%I:%M %p')} IST. "
-            f"User is in Chennai, India.]"
+            f"Current time: {now.strftime('%I:%M %p')} IST.]"
         )
 
     try:
-        # ── Crisis check ──────────────────────────────────────────────────────
+        # Crisis check
         is_crisis, is_soft_distress, _ = check_content_safety(message)
         if is_crisis:
             print(f"🚨 CRISIS for user {user_id}: {message[:60]}")
@@ -409,7 +285,7 @@ def motivate():
                     except: pass
             return jsonify(CRISIS_RESPONSE), 200
 
-        # ── Emotion detection ─────────────────────────────────────────────────
+        # Emotion detection
         emotion_data = detect_emotion(message)
         emotion      = emotion_data["emotion"]
         vader_score  = emotion_data["score"]
@@ -424,29 +300,26 @@ def motivate():
             emotion = "sad"; vader_score = -0.8
             print("  → GRIEF OVERRIDE")
 
-        # ── User context ──────────────────────────────────────────────────────
         context_str = get_user_context(db, user_id) if user_id else "New user."
 
-        # ── Detect mode ───────────────────────────────────────────────────────
+        # Detect mode
         is_followup       = any(re.search(p, msg_lower) for p in FOLLOWUP_PATTERNS)
         user_wants_answer = any(re.search(p, msg_lower) for p in REQUEST_PATTERNS)
         ends_with_q       = msg_lower.rstrip().endswith("?")
         topic             = detect_topic(message)
+        is_emotional      = emotion in ("sad","stressed","anxious","frustrated","negative") and not user_wants_answer and not ends_with_q
+        answer_mode       = (user_wants_answer or ends_with_q or is_followup) and not is_emotional
 
-        # Mode priority: topic → answer → emotional
-        is_emotional  = emotion in ("sad","stressed","anxious","frustrated","negative") and not user_wants_answer and not ends_with_q
-        answer_mode   = (user_wants_answer or ends_with_q or is_followup) and not is_emotional
-
-        # ── Fetch live data if needed ─────────────────────────────────────────
+        # Fetch live data
         live_data = ""
         if topic == "weather":
             ws, _ = fetch_live_weather()
-            live_data = f"\n[LIVE WEATHER DATA FOR CHENNAI RIGHT NOW]: {ws}" if ws else "\n[WEATHER API UNAVAILABLE]: Tell user to check their phone weather app."
+            live_data = f"\n[LIVE WEATHER DATA]: {ws}" if ws else "\n[WEATHER UNAVAILABLE]: Tell user to check phone weather app."
         elif topic == "news":
             ns, _ = fetch_live_news()
-            live_data = f"\n[LIVE NEWS HEADLINES RIGHT NOW]:\n{ns}" if ns else "\n[NEWS API NOT CONFIGURED]: Direct user to timesofindia.com, ndtv.com."
+            live_data = f"\n[LIVE NEWS]:\n{ns}" if ns else "\n[NEWS UNAVAILABLE]: Direct to timesofindia.com, ndtv.com."
 
-        # ── Build system prompt ───────────────────────────────────────────────
+        # Build system prompt
         if topic and topic in TOPIC_SYSTEM:
             system_msg = real_date_context + live_data + "\n\n" + TOPIC_SYSTEM[topic]
         elif is_emotional or emotion in ("sad","stressed","anxious","frustrated","negative"):
@@ -458,17 +331,15 @@ def motivate():
             system_msg = real_date_context + "\n\n" + BASE_RULES + f"\nYOUR PERSONA: {suffix}"
 
         conv_messages = [{"role":"system","content":system_msg}]
-
         if conversation_history:
             for line in conversation_history.strip().split("\n"):
                 line = line.strip()
                 if line.startswith("user:"):
-                    conv_messages.append({"role":"user",      "content":line[5:].strip()})
+                    conv_messages.append({"role":"user","content":line[5:].strip()})
                 elif line.startswith("bot:"):
-                    conv_messages.append({"role":"assistant", "content":line[4:].strip()})
+                    conv_messages.append({"role":"assistant","content":line[4:].strip()})
 
-        emotion_tip = EMOTION_INSTRUCTIONS.get(emotion, "Meet them where they are.")
-
+        emotion_tip  = EMOTION_INSTRUCTIONS.get(emotion, "Meet them where they are.")
         conv_summary = ""
         if conversation_history and is_followup:
             recent = [l.strip() for l in conversation_history.strip().split("\n") if l.strip()][-6:]
@@ -501,7 +372,7 @@ def motivate():
 
         conv_messages.append({"role":"user","content":user_prompt})
 
-        # ── Groq call ─────────────────────────────────────────────────────────
+        # Groq call
         rt = topic in ("weather","news","datetime","capability")
         max_tok = 100 if rt else (180 if answer_mode else 100)
         resp = _groq.chat.completions.create(
@@ -550,6 +421,7 @@ def motivate():
                     db.commit()
                 except Exception: pass
 
+            # Award XP
             try:
                 xp_awarded = 10
                 db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+:xp WHERE id=:uid"),
@@ -559,22 +431,12 @@ def motivate():
                 try: db.rollback()
                 except: pass
 
+            # Update streak via shared utility
             try:
-                rows = db.execute(sql_text(
-                    "SELECT DISTINCT DATE(created_at) FROM motivation_sessions WHERE user_id=:uid ORDER BY 1 DESC LIMIT 60"
-                ), {"uid":int(user_id)}).fetchall()
-                dates = set(str(r[0]) for r in rows)
-                streak = 0; today = date.today()
-                for i in range(60):
-                    d = today - timedelta(days=i)
-                    if str(d) in dates: streak += 1
-                    else: break
-                db.execute(sql_text("UPDATE users SET current_streak=:s WHERE id=:uid"),
-                           {"s":streak,"uid":int(user_id)})
-                db.commit(); streak_count = streak
-            except Exception:
-                try: db.rollback()
-                except: pass
+                from streak_utils import update_user_streak
+                streak_count, _ = update_user_streak(db, int(user_id))
+            except Exception as se:
+                print(f"[motivate] streak_utils error: {se}")
 
             try:
                 row = db.execute(sql_text("SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid"),
@@ -582,7 +444,7 @@ def motivate():
                 sessions_count = row[0] if row else 0
             except Exception: pass
 
-            # Check for newly earned badges after each session
+            # Check badges
             try:
                 from routes.gamification import check_and_award_badges as cab
                 cab(db, int(user_id))

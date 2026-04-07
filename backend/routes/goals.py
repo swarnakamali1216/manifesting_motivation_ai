@@ -32,6 +32,122 @@ def calc_step_count(timeline, daily_time, depth):
     return max(4, min(15, count))
 
 
+
+# ── Verified resource domains (these actually exist and stay online) ─────────
+# ── Style-aware URL pools — rotated per step so each step gets a different resource ──
+_STYLE_URLS = {
+    "videos": [
+        "https://www.youtube.com/results?search_query=beginner+tutorial",
+        "https://www.youtube.com/results?search_query=learn+step+by+step",
+        "https://www.udemy.com/courses/",
+        "https://www.coursera.org/",
+        "https://www.youtube.com/results?search_query=how+to",
+    ],
+    "reading": [
+        "https://developer.mozilla.org/en-US/docs/",
+        "https://docs.python.org/3/tutorial/",
+        "https://www.freecodecamp.org/news/",
+        "https://dev.to/",
+        "https://medium.com/",
+        "https://jamesclear.com/",
+    ],
+    "practice": [
+        "https://leetcode.com/",
+        "https://www.hackerrank.com/",
+        "https://github.com/topics/",
+        "https://replit.com/",
+        "https://www.kaggle.com/learn",
+        "https://codepen.io/",
+    ],
+    "mix": [
+        "https://www.youtube.com/results?search_query=tutorial",
+        "https://developer.mozilla.org/en-US/docs/",
+        "https://github.com/topics/",
+        "https://www.coursera.org/",
+        "https://leetcode.com/",
+        "https://www.freecodecamp.org/news/",
+    ],
+}
+
+_SAFE_URLS = {
+    "python":          "https://docs.python.org/3/tutorial/",
+    "javascript":      "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide",
+    "java":            "https://dev.java/learn/",
+    "react":           "https://react.dev/learn",
+    "web":             "https://www.theodinproject.com",
+    "machine learning":"https://www.kaggle.com/learn",
+    "data science":    "https://www.kaggle.com/learn",
+    "ai":              "https://developers.google.com/machine-learning/crash-course",
+    "fitness":         "https://www.youtube.com/results?search_query=fitness+workout",
+    "finance":         "https://www.investopedia.com",
+    "career":          "https://www.linkedin.com/learning/",
+    "language":        "https://www.duolingo.com",
+    "productivity":    "https://jamesclear.com/atomic-habits",
+    "habits":          "https://jamesclear.com/atomic-habits",
+    "mindfulness":     "https://www.headspace.com",
+    "health":          "https://www.youtube.com/results?search_query=health+wellness",
+    "general":         "https://www.coursera.org",
+}
+
+_KNOWN_GOOD_DOMAINS = [
+    "docs.python.org", "developer.mozilla.org", "react.dev", "dev.java",
+    "www.theodinproject.com", "www.freecodecamp.org", "www.kaggle.com",
+    "developers.google.com", "course.fast.ai", "www.coursera.org",
+    "www.linkedin.com", "www.youtube.com", "github.com", "stackoverflow.com",
+    "numpy.org", "pandas.pydata.org", "scikit-learn.org", "tensorflow.org",
+    "pytorch.org", "leetcode.com", "hackerrank.com", "codecademy.com",
+    "www.duolingo.com", "www.headspace.com", "jamesclear.com", "www.nike.com",
+    "www.investopedia.com", "hbr.org", "www.udemy.com", "scrimba.com",
+    "jakevdp.github.io", "www.notion.so", "trello.com", "www.habitica.com",
+    "www.calm.com", "icallhelpline.org", "startingstrength.com", "css-tricks.com",
+    "web.dev", "vuejs.org", "angular.io", "nextjs.org", "fastapi.tiangolo.com",
+    "flask.palletsprojects.com", "www.postgresql.org", "www.mongodb.com",
+]
+
+def _safe_resource_url(url: str, goal_title: str, category: str,
+                       learning_style: str = "mix", step_index: int = 0,
+                       step_title: str = "") -> str:
+    """
+    Validate URL. If valid known domain, keep it.
+    If invalid/unknown, generate a SPECIFIC search URL for this exact step.
+    Never return the same generic URL for every step.
+    """
+    from urllib.parse import urlparse, quote_plus
+
+    def specific_fallback():
+        # Use step_title if available, fall back to goal_title
+        topic = (step_title or goal_title or "tutorial").strip()
+        topic_enc = quote_plus(topic)
+        if learning_style == "videos":
+            return f"https://www.youtube.com/results?search_query={topic_enc}"
+        elif learning_style == "reading":
+            return f"https://www.freecodecamp.org/news/search/?query={topic_enc}"
+        elif learning_style == "practice":
+            return f"https://github.com/search?q={topic_enc}&type=repositories"
+        else:
+            # Mix: rotate between sources by step_index
+            sources = [
+                f"https://www.youtube.com/results?search_query={topic_enc}",
+                f"https://www.freecodecamp.org/news/search/?query={topic_enc}",
+                f"https://github.com/search?q={topic_enc}&type=repositories",
+                f"https://www.coursera.org/search?query={topic_enc}",
+            ]
+            return sources[step_index % len(sources)]
+
+    if not url:
+        return specific_fallback()
+    try:
+        parsed = urlparse(url)
+        full   = parsed.netloc.lower()
+        # Allow if domain is in our verified list
+        for good in _KNOWN_GOOD_DOMAINS:
+            if good in full or full in good:
+                return url
+        # Unknown domain — return a specific search URL for this step
+        return specific_fallback()
+    except Exception:
+        return specific_fallback()
+
 # ── Core roadmap generator ─────────────────────────────────────
 def generate_roadmap_full(title, category, deadline=None,
                            daily_time="30 mins", learning_style="mix",
@@ -53,6 +169,15 @@ def generate_roadmap_full(title, category, deadline=None,
         "mix":      "learns through a mix of videos, reading and practice",
     }.get(learning_style, "prefers a mix of resources")
 
+    # Resource type guidance based on learning style
+    style_resource_rules = {
+        "videos":   "ALL resource URLs must be YouTube videos (https://www.youtube.com/...) or video courses (https://www.udemy.com, https://www.coursera.org). NO documentation links.",
+        "reading":  "ALL resource URLs must be documentation, articles or books: docs.python.org, developer.mozilla.org, medium.com, dev.to, hbr.org, jamesclear.com. NO video links.",
+        "practice": "ALL resource URLs must be interactive/hands-on: leetcode.com, hackerrank.com, replit.com, codepen.io, github.com, kaggle.com. NO passive reading links.",
+        "mix":      "Use a variety: mix YouTube videos, documentation links, and practice sites across steps.",
+    }
+    resource_rule = style_resource_rules.get(learning_style, style_resource_rules["mix"])
+
     prompt = f"""You are an expert learning coach. Create a {num_steps}-step roadmap for this goal.
 
 GOAL: "{title}"
@@ -64,14 +189,17 @@ TIMELINE: {timeline}
 DEPTH: {depth}
 DEADLINE: {deadline or "flexible"}
 
+RESOURCE RULE (CRITICAL — FOLLOW EXACTLY): {resource_rule}
+
 CRITICAL RULES:
 1. Return ONLY a valid JSON array. No extra text, no markdown, no explanation.
 2. The array must have EXACTLY {num_steps} objects.
 3. Every "resource" field MUST start with "https://" — never bare domains.
-4. Every step MUST have "resource_how_to" — 1-2 sentences explaining exactly how to use the resource.
-5. Titles must be specific (not generic like "Learn basics").
-6. Steps must build on each other logically.
-7. "duration" must match the daily_time of {daily_time}.
+4. FOLLOW THE RESOURCE RULE ABOVE — match resources to the learning style "{learning_style}".
+5. Every step MUST have "resource_how_to" — 1-2 sentences on exactly how to use this specific resource.
+6. Titles must be specific (not generic like "Learn basics").
+7. Steps must build on each other logically.
+8. "duration" must match the daily_time of {daily_time}.
 
 JSON FORMAT (return exactly this structure, {num_steps} items):
 [
@@ -117,12 +245,42 @@ Generate {num_steps} steps now for: {title}"""
         else:
             steps = json.loads(raw)
 
-        # Post-process: ensure https:// on all resources
-        for s in steps:
-            if s.get("resource") and not s["resource"].startswith("http"):
-                s["resource"] = "https://" + s["resource"]
+        # Post-process: ensure https:// and replace hallucinated/invalid URLs
+        # Pass step_index so each step gets a DIFFERENT fallback URL (not all the same)
+        for idx_s, s in enumerate(steps):
+            raw_url = s.get("resource", "")
+            if raw_url and not raw_url.startswith("http"):
+                raw_url = "https://" + raw_url
+            s["resource"] = _safe_resource_url(
+                raw_url, title, category,
+                learning_style=learning_style,
+                step_index=idx_s,
+                step_title=s.get("title", "")
+            )
             if not s.get("resource_how_to"):
-                s["resource_how_to"] = "Open this resource and work through it systematically at your own pace."
+                # Build URL-specific how-to that tells user exactly what they'll see
+                url = s.get("resource","")
+                step_t = s.get("title","this topic")
+                if "youtube.com/results" in url:
+                    s["resource_how_to"] = f"🔍 This opens a YouTube search for '{step_t}'. Click the first video that matches your level. Watch it fully, pause when needed, and try examples yourself."
+                elif "youtube.com/watch" in url or "youtu.be" in url:
+                    s["resource_how_to"] = f"▶️ Watch this YouTube video on '{step_t}'. Pause every few minutes to practice what is shown. Re-watch parts you don't understand."
+                elif "github.com/search" in url:
+                    s["resource_how_to"] = f"🔍 This searches GitHub for '{step_t}' projects. Pick a repo with many ⭐ stars, read its README, clone it locally, and try running the code."
+                elif "github.com" in url:
+                    s["resource_how_to"] = f"📂 Open this GitHub repository for '{step_t}'. Read the README fully. Then try cloning and running it following the setup instructions."
+                elif "freecodecamp.org/news/search" in url:
+                    s["resource_how_to"] = f"🔍 This searches FreeCodeCamp for '{step_t}'. Click the most relevant article. Read it top to bottom and try every code example shown."
+                elif "freecodecamp.org" in url:
+                    s["resource_how_to"] = f"📖 Read this FreeCodeCamp article on '{step_t}'. Try every code snippet in your browser console or editor. Write down 3 key things you learned."
+                elif "coursera.org/search" in url:
+                    s["resource_how_to"] = f"🔍 This searches Coursera for '{step_t}'. Find a free or audit course. Watch the Week 1 intro video to check if the level fits you before committing."
+                elif "docs.python.org" in url or "developer.mozilla.org" in url:
+                    s["resource_how_to"] = f"📚 Official documentation for '{step_t}'. Read the intro section carefully. Run every code example you see. Documentation is dense — take your time."
+                elif "leetcode.com" in url or "hackerrank.com" in url:
+                    s["resource_how_to"] = f"💻 Practice platform for '{step_t}'. Pick the 'Easy' difficulty first. Try solving without hints for 15 minutes, then use the Discussion tab if stuck."
+                else:
+                    s["resource_how_to"] = f"🌐 This resource covers '{step_t}'. Read or watch the main content, try any examples shown, then test your understanding by explaining it in your own words."
             if not s.get("duration"):
                 s["duration"] = daily_time
 

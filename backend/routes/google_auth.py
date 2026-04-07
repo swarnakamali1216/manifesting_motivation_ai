@@ -1,64 +1,90 @@
-﻿from flask import Blueprint, request, jsonify
-from models import SessionLocal, User, UserProfile
-import jwt, os, json, base64
-from datetime import datetime, timedelta
+﻿"""
+routes/google.py — Google OAuth route
+FIXED: Removed UserProfile import (table no longer exists — gamification lives on users table)
+Place at: backend/routes/google.py
+"""
+from flask import Blueprint, request, jsonify, redirect
+from models import SessionLocal, User
+from sqlalchemy import text as sql_text
+import os, requests as req
+from datetime import datetime
 
-google_auth_bp = Blueprint("google_auth", __name__)
+google_bp = Blueprint("google", __name__)
 
-@google_auth_bp.route("/google", methods=["POST"])
-def google_auth():
+GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI  = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5000/api/auth/google/callback")
+
+
+@google_bp.route("/auth/google/url", methods=["GET"])
+def google_url():
+    if not GOOGLE_CLIENT_ID:
+        return jsonify({"error": "Google OAuth not configured"}), 500
+    url = (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={GOOGLE_CLIENT_ID}"
+        f"&redirect_uri={GOOGLE_REDIRECT_URI}"
+        "&response_type=code"
+        "&scope=openid%20email%20profile"
+        "&access_type=offline"
+    )
+    return jsonify({"url": url})
+
+
+@google_bp.route("/auth/google/callback", methods=["GET", "POST"])
+def google_callback():
+    code = request.args.get("code") or (request.get_json() or {}).get("code")
+    if not code:
+        return jsonify({"error": "No code provided"}), 400
+
     db = SessionLocal()
     try:
-        data = request.get_json() or {}
-        credential = data.get("credential")
-        
-        if not credential:
-            return jsonify({"error": "No credential"}), 400
-        
-        parts = credential.split('.')
-        if len(parts) != 3:
-            return jsonify({"error": "Invalid credential"}), 400
-        
-        payload = parts[1] + '=' * (4 - len(parts[1]) % 4)
-        decoded = json.loads(base64.urlsafe_b64decode(payload))
-        
-        email = decoded.get("email", "").lower().strip()
-        name = decoded.get("name", "User")
-        picture = decoded.get("picture", "")
-        
+        # Exchange code for tokens
+        token_resp = req.post("https://oauth2.googleapis.com/token", data={
+            "code":          code,
+            "client_id":     GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri":  GOOGLE_REDIRECT_URI,
+            "grant_type":    "authorization_code",
+        }, timeout=10)
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return jsonify({"error": "Token exchange failed", "detail": token_data}), 400
+
+        # Get user info
+        info_resp = req.get("https://www.googleapis.com/oauth2/v3/userinfo",
+                            headers={"Authorization": f"Bearer {access_token}"}, timeout=10)
+        info = info_resp.json()
+        email     = info.get("email", "")
+        name      = info.get("name", "")
+        google_id = info.get("sub", "")
+
         if not email:
-            return jsonify({"error": "No email"}), 400
-        
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            user = User(name=name, email=email, google_id=decoded.get("sub"), role="user")
-            db.add(user)
+            return jsonify({"error": "Could not get email from Google"}), 400
+
+        # Find or create user — no UserProfile, gamification is on users table directly
+        row = db.execute(sql_text("SELECT id, name, email, role FROM users WHERE email=:e"), {"e": email}).fetchone()
+        if row:
+            uid = row[0]
+            db.execute(sql_text("UPDATE users SET last_login=:t WHERE id=:uid"), {"t": datetime.utcnow(), "uid": uid})
             db.commit()
-            db.refresh(user)
-            
-            profile = UserProfile(user_id=user.id, xp=0, level=1, badges=[])
-            db.add(profile)
+            user = {"id": uid, "name": row[1], "email": row[2], "role": row[3]}
+        else:
+            result = db.execute(sql_text(
+                "INSERT INTO users (name, email, google_id, role, is_active, xp, level, current_streak, created_at) "
+                "VALUES (:name, :email, :gid, 'user', TRUE, 0, 1, 0, NOW()) RETURNING id"
+            ), {"name": name, "email": email, "gid": google_id}).fetchone()
+            uid = result[0]
             db.commit()
-        
-        token_payload = {
-            "user_id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            "exp": datetime.utcnow() + timedelta(days=7),
-            "iat": datetime.utcnow()
-        }
-        token = jwt.encode(token_payload, os.getenv("SECRET_KEY", "test"), algorithm="HS256")
-        
-        return jsonify({
-            "token": token,
-            "user": {"id": user.id, "name": user.name, "email": user.email, "picture": picture, "role": user.role}
-        }), 200
-    
+            user = {"id": uid, "name": name, "email": email, "role": "user"}
+
+        return jsonify({"success": True, "user": user})
+
     except Exception as e:
-        db.rollback()
-        print(f"Google auth error: {e}")
+        try: db.rollback()
+        except: pass
+        print(f"[google] Error: {e}")
         return jsonify({"error": str(e)}), 500
-    
     finally:
         db.close()

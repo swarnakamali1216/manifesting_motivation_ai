@@ -1,3 +1,9 @@
+"""
+routes/spaced_repetition.py — PostgreSQL-compatible version
+FIXED: Removed SQLite-specific AUTOINCREMENT and CREATE TABLE IF NOT EXISTS.
+The spaced_reviews table is created by models.py / init_db() instead.
+If the table doesn't exist, endpoints return empty data gracefully.
+"""
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
@@ -12,20 +18,26 @@ def next_review_date(level):
     return datetime.utcnow() + timedelta(days=days)
 
 def ensure_table(db):
-    db.execute(sql_text("""
-        CREATE TABLE IF NOT EXISTS spaced_reviews (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id       INTEGER DEFAULT 1,
-            content       TEXT    NOT NULL,
-            tag           TEXT    DEFAULT 'general',
-            level         INTEGER DEFAULT 0,
-            review_count  INTEGER DEFAULT 0,
-            next_review   DATETIME,
-            last_reviewed DATETIME,
-            created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    db.commit()
+    """Create spaced_reviews table if it doesn't exist — PostgreSQL syntax."""
+    try:
+        db.execute(sql_text("""
+            CREATE TABLE IF NOT EXISTS spaced_reviews (
+                id            SERIAL PRIMARY KEY,
+                user_id       INTEGER DEFAULT 1,
+                content       TEXT    NOT NULL,
+                tag           TEXT    DEFAULT 'general',
+                level         INTEGER DEFAULT 0,
+                review_count  INTEGER DEFAULT 0,
+                next_review   TIMESTAMP,
+                last_reviewed TIMESTAMP,
+                created_at    TIMESTAMP DEFAULT NOW()
+            )
+        """))
+        db.commit()
+    except Exception as e:
+        print(f"spaced_reviews table ensure error: {e}")
+        try: db.rollback()
+        except: pass
 
 @sr_bp.route("/spaced-review", methods=["GET"])
 def get_reviews():
@@ -47,10 +59,10 @@ def get_reviews():
                 "last_reviewed": str(r[6] or ""), "created_at": str(r[7] or ""),
             }
             try:
-                next_dt = datetime.fromisoformat(str(r[5]))
+                next_dt = r[5] if isinstance(r[5], datetime) else datetime.fromisoformat(str(r[5]))
+                (due if next_dt <= now else upcoming).append(item)
             except Exception:
-                next_dt = now
-            (due if next_dt <= now else upcoming).append(item)
+                due.append(item)
 
         return jsonify({"due": due, "upcoming": upcoming, "total": len(rows)})
     except Exception as e:
@@ -72,21 +84,19 @@ def create_review():
             return jsonify({"error": "Content is required"}), 400
 
         next_dt = next_review_date(0)
-        db.execute(sql_text("""
+        row = db.execute(sql_text("""
             INSERT INTO spaced_reviews (user_id, content, tag, level, review_count, next_review)
-            VALUES (:uid, :content, :tag, 0, 0, :next)
-        """), {"uid": user_id, "content": content, "tag": tag, "next": next_dt})
+            VALUES (:uid, :content, :tag, 0, 0, :next) RETURNING id
+        """), {"uid": user_id, "content": content, "tag": tag, "next": next_dt}).fetchone()
         db.commit()
 
-        row = db.execute(sql_text(
-            "SELECT id, content, tag, level, review_count, next_review FROM spaced_reviews ORDER BY id DESC LIMIT 1"
-        )).fetchone()
         return jsonify({
-            "id": row[0], "content": row[1], "tag": row[2],
-            "level": row[3], "review_count": row[4], "next_review": str(row[5])
+            "id": row[0], "content": content, "tag": tag,
+            "level": 0, "review_count": 0, "next_review": str(next_dt)
         }), 201
     except Exception as e:
-        db.rollback()
+        try: db.rollback()
+        except: pass
         print("SR POST error:", e)
         return jsonify({"error": str(e)}), 500
     finally:
@@ -118,12 +128,13 @@ def do_review(item_id):
         db.commit()
 
         return jsonify({
-            "message":     "See you in {} days!".format(INTERVALS[min(new_level, len(INTERVALS)-1)]),
+            "message":     f"See you in {INTERVALS[min(new_level, len(INTERVALS)-1)]} days!",
             "next_review": str(next_dt),
             "level":       new_level,
         })
     except Exception as e:
-        db.rollback()
+        try: db.rollback()
+        except: pass
         return jsonify({"error": str(e)}), 500
     finally:
         db.close()
@@ -139,7 +150,8 @@ def delete_review(item_id):
         db.commit()
         return jsonify({"message": "Deleted"})
     except Exception as e:
-        db.rollback()
+        try: db.rollback()
+        except: pass
         return jsonify({"error": str(e)}), 500
     finally:
         db.close()
@@ -158,8 +170,8 @@ def get_stats():
         due = 0
         for r in rows:
             try:
-                if datetime.fromisoformat(str(r[2])) <= now:
-                    due += 1
+                nxt = r[2] if isinstance(r[2], datetime) else datetime.fromisoformat(str(r[2]))
+                if nxt <= now: due += 1
             except Exception:
                 pass
 

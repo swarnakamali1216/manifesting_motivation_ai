@@ -11,4 +11,4 @@ psycopg2-binary
 requests
 # force rebuild 1775650036
 
-httpx==0.27.0
+

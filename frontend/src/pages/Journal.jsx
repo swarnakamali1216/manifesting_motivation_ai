@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+﻿import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 
 var API = process.env.REACT_APP_API_URL || "https://manifesting-motivation-backend.onrender.com/api";
@@ -532,6 +532,7 @@ function Journal({ user }) {
 }
 
 export default Journal;
+
 
 
 

@@ -70,13 +70,20 @@ function toIST(iso) {
 
 }
 
+function safeDate(iso) {
+  if (!iso) return new Date();
+  var s = (iso+"").replace(" ","T");
+  if (!s.endsWith("Z") && !s.includes("+")) s += "Z";
+  var d = new Date(s);
+  return isNaN(d) ? new Date() : d;
+}
 function formatDate(iso) {
 
   if (!iso) return "";
 
   var d = toIST(iso);
 
-  return d.toLocaleDateString("en-IN", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+  var d2 = safeDate(iso); return d2.toLocaleDateString("en-IN", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
 
 }
 
@@ -118,7 +125,7 @@ function MoodStreak({ entries }) {
 
     // Convert UTC created_at to IST date string so keys match the week loop below
 
-    var dt = new Date(e.created_at); var d = isNaN(dt) ? "" : new Date(dt.getTime() + IST_MS).toISOString().slice(0,10);
+    var raw1 = e.created_at ? (e.created_at+"").replace(" ","T") : null; if(raw1 && !raw1.endsWith("Z") && !raw1.includes("+")) raw1+="Z"; var dt = raw1 ? new Date(raw1) : new Date(); var d = isNaN(dt) ? "" : new Date(dt.getTime() + IST_MS).toISOString().slice(0,10);
 
     if (d) days[d] = e.mood || "okay";
 
@@ -754,7 +761,7 @@ function Journal({ user }) {
 
     .sort(function(a,b){
 
-      var da = new Date(a.created_at), db = new Date(b.created_at);
+      var da = a.created_at ? new Date((a.created_at+"").replace(" ","T")) : new Date(0); var db = b.created_at ? new Date((b.created_at+"").replace(" ","T")) : new Date(0);
 
       return sortDir==="desc" ? db-da : da-db;
 
@@ -792,7 +799,7 @@ function Journal({ user }) {
 
     // Apply IST to get correct calendar date
 
-    var ts = new Date(e.created_at.replace(" ", "T") + (e.created_at.includes("T") ? "" : "Z")).getTime();
+    var raw2 = e.created_at ? (e.created_at+"").replace(" ","T") : new Date().toISOString(); if(!raw2.endsWith("Z") && !raw2.includes("+")) raw2+="Z"; var ts = new Date(raw2).getTime(); if(isNaN(ts)) ts = Date.now();
 
     var dd = new Date(ts + IST_MS2); return isNaN(dd) ? "" : dd.toISOString().slice(0,10);
 
@@ -810,7 +817,7 @@ function Journal({ user }) {
 
     var ts = e.created_at
 
-      ? new Date(e.created_at.replace(" ","T") + (e.created_at.includes("T") ? "" : "Z")).getTime() + IST_GRP
+      ? (()=>{ var raw3 = e.created_at ? (e.created_at+"").replace(" ","T") : new Date().toISOString(); if(!raw3.endsWith("Z") && !raw3.includes("+")) raw3+="Z"; var t=new Date(raw3).getTime(); return (isNaN(t)?Date.now():t)+IST_GRP; })()
 
       : Date.now();
 

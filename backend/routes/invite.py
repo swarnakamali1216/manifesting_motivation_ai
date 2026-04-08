@@ -225,14 +225,14 @@ def build_email_html(sender_name, sender_email, invite_url):
     return html
 
 
-@invite_bp.route("/invite/email", methods=["POST"])
+@invite_bp.route("/invite/send", methods=["POST"])
 def send_invite():
     """
     Allows multiple invites to same email.
     Records each invite in DB for XP tracking.
     """
     data     = request.get_json() or {}
-    to_email = (data.get("to_email") or "").strip()
+    to_email = (data.get("email") or data.get("to_email") or "").strip()
     user_id  = data.get("user_id")
 
     if not to_email or "@" not in to_email:
@@ -330,7 +330,3 @@ def get_invite_stats(user_id):
         db.close()
 
 
-@invite_bp.route("/invite/send", methods=["POST"])
-def send_invite_alias():
-    """Alias for /invite/email - some frontend versions call /invite/send."""
-    return send_invite()

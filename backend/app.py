@@ -1,5 +1,5 @@
-"""
-Manifesting Motivation AI — Backend
+ï»¿"""
+Manifesting Motivation AI ï¿½ Backend
 KEY FIX: admin_bp registered at /api (routes use /admin/... prefix internally)
          privacy_bp registered at /api/privacy (routes use /export etc)
 """
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     smtp   = os.getenv("SMTP_USER", "")
     print(f"""
 =======================================================
-  ?  Manifesting Motivation AI — Backend Running!
+  ?  Manifesting Motivation AI ï¿½ Backend Running!
   ??  http://localhost:5000
   ??  Groq:       {groq}
   ??  ElevenLabs: {eleven}
@@ -135,3 +135,4 @@ if __name__ == "__main__":
 =======================================================
 """)
     app.run(host="0.0.0.0", port=5000, debug=False)
+

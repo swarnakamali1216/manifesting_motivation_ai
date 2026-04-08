@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 adaptive_bp = Blueprint("adaptive", __name__)
-client      = Groq(api_key=os.getenv("GROQ_API_KEY"))
+def get_groq():
+    return Groq(api_key=)
 
 # ── Step count calculator — THE CORE FIX ─────────────────────────────────────
 # Maps (timeline, daily_time, depth) → realistic step count
@@ -88,7 +89,7 @@ Number of steps to generate: {num_steps}
 Generate exactly {num_steps} steps for this person to achieve "{title}" in {timeline}.
 Every step must fit in {daily_time}/day."""
 
-        resp = client.chat.completions.create(
+        resp = get_groq().chat.completions.create(
             model    = "llama-3.3-70b-versatile",
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -268,7 +269,7 @@ def prove_knowledge(goal_id, step_index):
             xp_gain  = 10
         else:
             try:
-                resp = client.chat.completions.create(
+                resp = get_groq().chat.completions.create(
                     model    = "llama-3.3-70b-versatile",
                     messages = [
                         {"role": "system", "content": """You are a warm, encouraging coach.
@@ -367,7 +368,7 @@ def report_struggle(goal_id, step_index):
         roadmap   = json.loads(goal[1]) if goal[1] else []
         step_info = roadmap[step_index] if step_index < len(roadmap) else {}
 
-        resp = client.chat.completions.create(
+        resp = get_groq().chat.completions.create(
             model    = "llama-3.3-70b-versatile",
             messages = [
                 {"role": "system", "content": """The user is struggling. Break the step into 3 TINY micro-tasks.

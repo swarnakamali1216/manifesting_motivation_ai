@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 predictor_bp = Blueprint("predictor", __name__)
-client       = Groq(api_key=os.getenv("GROQ_API_KEY"))
+def get_groq():
+    return Groq(api_key=)
 
 @predictor_bp.route("/predict/<int:user_id>", methods=["GET"])
 def predict(user_id):
@@ -71,7 +72,7 @@ User mood pattern: {positivity}% positive sessions
 Journal: {j_positive} positive, {j_negative} negative entries
 Predicted likelihood: {likelihood}%"""
 
-                    resp = client.chat.completions.create(
+                    resp = get_groq().chat.completions.create(
                         model    = "llama-3.3-70b-versatile",
                         messages = [
                             {

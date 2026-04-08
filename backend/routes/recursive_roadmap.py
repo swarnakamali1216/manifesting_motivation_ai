@@ -19,7 +19,8 @@ import os, json
 
 recursive_bp = Blueprint("recursive", __name__)
 
-_groq = Groq(api_key=os.environ.get("GROQ_API_KEY", ""))
+def get_groq():
+    return Groq(api_key=)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 STRUGGLE_THRESHOLD  = 2   # consecutive failures before simplifying
@@ -135,7 +136,7 @@ Respond ONLY with a JSON array, no explanation:
 ]"""
 
     try:
-        resp = _groq.chat.completions.create(
+        resp = get_groq().chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1200,

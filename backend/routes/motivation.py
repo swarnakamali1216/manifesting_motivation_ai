@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sentiment import detect_emotion, get_emotion_prompt
 
 motivation_bp = Blueprint("motivation", __name__)
-_groq = Groq(api_key=os.environ.get("GROQ_API_KEY", ""))
+def get_groq():
+    return Groq(api_key=)
 SELF_URL = "http://localhost:5000/api"
 
 def safe_str(val):
@@ -375,7 +376,7 @@ def motivate():
         # Groq call
         rt = topic in ("weather","news","datetime","capability")
         max_tok = 100 if rt else (180 if answer_mode else 100)
-        resp = _groq.chat.completions.create(
+        resp = get_groq().chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=conv_messages,
             max_tokens=max_tok,
@@ -483,7 +484,7 @@ def analyse_emotion():
 @motivation_bp.route("/motivate/quote", methods=["GET"])
 def daily_quote():
     try:
-        resp = _groq.chat.completions.create(
+        resp = get_groq().chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role":"user","content":"One powerful motivational quote under 20 words. Just the quote, no author, no quote marks."}],
             max_tokens=40,

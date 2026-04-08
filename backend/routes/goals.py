@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 goals_bp = Blueprint("goals", __name__)
-client   = Groq(api_key=os.getenv("GROQ_API_KEY"))
+def get_groq():
+    return Groq(api_key=)
 
 
 # ── Step count calculation (matches frontend preview) ─────────
@@ -216,7 +217,7 @@ JSON FORMAT (return exactly this structure, {num_steps} items):
 Generate {num_steps} steps now for: {title}"""
 
     try:
-        resp = client.chat.completions.create(
+        resp = get_groq().chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": "You are a roadmap generator. Return ONLY valid JSON arrays. Never add text before or after the JSON."},
@@ -511,7 +512,7 @@ def prove_step(goal_id, step_index):
             goal_row = db.execute(sql_text("SELECT title FROM goals WHERE id=:gid"), {"gid": goal_id}).fetchone()
             goal_title = goal_row[0] if goal_row else "your goal"
             try:
-                resp = client.chat.completions.create(
+                resp = get_groq().chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[{
                         "role": "user",
@@ -624,7 +625,7 @@ def struggle_help(goal_id, step_index):
         step_title = roadmap[step_index]["title"] if step_index < len(roadmap) else f"Step {step_index+1}"
 
         try:
-            resp = client.chat.completions.create(
+            resp = get_groq().chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": f"""
 Student struggling with: "{step_title}" (part of goal: "{title}")

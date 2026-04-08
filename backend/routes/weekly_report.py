@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 import os
 
 report_bp = Blueprint("report", __name__)
-_groq = Groq(api_key=os.environ.get("GROQ_API_KEY", ""))
+def get_groq():
+    return Groq(api_key=)
 
 def safe(val, default=""):
     return default if val is None else str(val).strip()
@@ -90,7 +91,7 @@ RECENT CHATS: {' | '.join(session_sample) or 'No sessions this week'}"""
             + "Be warm and personal, use their name (" + user_name + "). Reference actual goals."
         )
 
-        resp = _groq.chat.completions.create(
+        resp = get_groq().chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=600, temperature=0.75,

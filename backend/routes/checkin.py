@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 checkin_bp = Blueprint("checkin", __name__)
-client     = Groq(api_key=os.getenv("GROQ_API_KEY"))
+def get_groq():
+    return Groq(api_key=)
 analyzer   = SentimentIntensityAnalyzer()
 
 IST = 330  # UTC+5:30 minutes
@@ -109,7 +110,7 @@ def do_checkin():
 
         # AI reply
         try:
-            resp = client.chat.completions.create(
+            resp = get_groq().chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role":"user","content":
                     f"You are a caring daily check-in coach.\n{memory_ctx}{recent_ctx}"
@@ -330,7 +331,7 @@ def daily_nudge(user_id):
 
         if len(session_moods) >= 3 and goal_title:
             try:
-                ai_resp = client.chat.completions.create(
+                ai_resp = get_groq().chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[{"role":"user","content":
                         f"One motivating nudge (2 sentences, under 50 words).\n"

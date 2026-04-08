@@ -12,7 +12,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 memory_bp = Blueprint("memory", __name__)
-client    = Groq(api_key=os.getenv("GROQ_API_KEY"))
+def get_groq():
+    return Groq(api_key=)
 
 
 def generate_personalized_insight(sessions, journals, goals):
@@ -32,7 +33,7 @@ def generate_personalized_insight(sessions, journals, goals):
 - Recent journal moods: {', '.join(journal_moods) if journal_moods else 'none yet'}
 - Last message: '{last_msg}'"""
 
-        response = client.chat.completions.create(
+        response = get_groq().chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": """You are an AI memory coach analyzing a user's complete journey.
@@ -64,7 +65,7 @@ def generate_accountability(sessions, goals):
 Active goals: {len(active_goals)}
 Goal titles: {', '.join([g.get('title','') for g in active_goals[:3]])}"""
 
-        response = client.chat.completions.create(
+        response = get_groq().chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": """You are an accountability partner following up on the user's last session.

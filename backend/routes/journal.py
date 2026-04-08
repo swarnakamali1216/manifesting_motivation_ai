@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 journal_bp = Blueprint("journal", __name__)
-client     = Groq(api_key=os.getenv("GROQ_API_KEY"))
+def get_groq():
+    return Groq(api_key=)
 
 
 # ── GET /journal ─────────────────────────────────────────────
@@ -66,7 +67,7 @@ def add_journal():
         # AI insight
         ai_insight = None
         try:
-            resp = client.chat.completions.create(
+            resp = get_groq().chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content":
                     f"A student wrote this journal entry (mood: {mood}):\n\"{content[:400]}\"\n\n"
@@ -210,7 +211,7 @@ def weekly_recap():
             f"Keep reflecting — every entry builds self-awareness."
         )
         try:
-            resp = client.chat.completions.create(
+            resp = get_groq().chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content":
                     f"You are a warm AI coach reviewing a student's journal entries from the past week.\n\n"

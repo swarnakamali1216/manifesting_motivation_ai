@@ -13,7 +13,7 @@ load_dotenv()
 
 memory_bp = Blueprint("memory", __name__)
 def get_groq():
-    return Groq(api_key=)
+    return Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 
 def generate_personalized_insight(sessions, journals, goals):

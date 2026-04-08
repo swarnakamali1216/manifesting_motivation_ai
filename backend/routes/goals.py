@@ -18,7 +18,7 @@ load_dotenv()
 
 goals_bp = Blueprint("goals", __name__)
 def get_groq():
-    return Groq(api_key=)
+    return Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 
 # ── Step count calculation (matches frontend preview) ─────────

@@ -20,7 +20,7 @@ import os, json
 recursive_bp = Blueprint("recursive", __name__)
 
 def get_groq():
-    return Groq(api_key=)
+    return Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 STRUGGLE_THRESHOLD  = 2   # consecutive failures before simplifying

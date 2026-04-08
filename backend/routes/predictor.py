@@ -8,7 +8,7 @@ load_dotenv()
 
 predictor_bp = Blueprint("predictor", __name__)
 def get_groq():
-    return Groq(api_key=)
+    return Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 @predictor_bp.route("/predict/<int:user_id>", methods=["GET"])
 def predict(user_id):

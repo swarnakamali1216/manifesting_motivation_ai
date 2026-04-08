@@ -7,7 +7,7 @@ import os
 
 report_bp = Blueprint("report", __name__)
 def get_groq():
-    return Groq(api_key=)
+    return Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 def safe(val, default=""):
     return default if val is None else str(val).strip()

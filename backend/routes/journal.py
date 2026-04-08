@@ -8,7 +8,7 @@ load_dotenv()
 
 journal_bp = Blueprint("journal", __name__)
 def get_groq():
-    return Groq(api_key=)
+    return Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 
 # ── GET /journal ─────────────────────────────────────────────

@@ -8,7 +8,7 @@ load_dotenv()
 
 adaptive_bp = Blueprint("adaptive", __name__)
 def get_groq():
-    return Groq(api_key=)
+    return Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 # ── Step count calculator — THE CORE FIX ─────────────────────────────────────
 # Maps (timeline, daily_time, depth) → realistic step count

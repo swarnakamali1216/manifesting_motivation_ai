@@ -81,8 +81,6 @@ function formatDate(iso) {
   if (!iso) return "Unknown Date";
   var d = safeDate(iso);
   return d.toLocaleDateString("en-IN", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
-});
-
 }
 
 function formatTime(iso) {

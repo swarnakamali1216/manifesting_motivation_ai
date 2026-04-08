@@ -10,13 +10,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 app = Flask(__name__)
-
 CORS(app,
-     origins=["http://localhost:3000","http://127.0.0.1:3000"],
+     origins=["http://localhost:3000","http://127.0.0.1:3000","https://manifesting-motivation-ai.vercel.app"],
      supports_credentials=True,
      allow_headers=["Content-Type","Authorization"],
      methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"])
-
 def _find_bp(module_path):
     """Auto-detect any Flask Blueprint in a module."""
     from flask import Blueprint as BP

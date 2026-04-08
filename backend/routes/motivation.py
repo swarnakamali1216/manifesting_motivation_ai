@@ -16,7 +16,7 @@ from sentiment import detect_emotion, get_emotion_prompt
 
 motivation_bp = Blueprint("motivation", __name__)
 def get_groq():
-    return Groq(api_key=)
+    return Groq(api_key=os.environ.get('GROQ_API_KEY', ''))
 SELF_URL = "http://localhost:5000/api"
 
 def safe_str(val):

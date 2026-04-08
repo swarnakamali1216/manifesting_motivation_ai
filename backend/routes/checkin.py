@@ -10,7 +10,7 @@ load_dotenv()
 
 checkin_bp = Blueprint("checkin", __name__)
 def get_groq():
-    return Groq(api_key=)
+    return Groq(api_key=os.getenv('GROQ_API_KEY'))
 analyzer   = SentimentIntensityAnalyzer()
 
 IST = 330  # UTC+5:30 minutes

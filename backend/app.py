@@ -15,6 +15,12 @@ CORS(app,
      supports_credentials=True,
      allow_headers=["Content-Type","Authorization"],
      methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"])
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS')
+    return response
 def _find_bp(module_path):
     """Auto-detect any Flask Blueprint in a module."""
     from flask import Blueprint as BP

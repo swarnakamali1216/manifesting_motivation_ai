@@ -78,12 +78,10 @@ function safeDate(iso) {
   return isNaN(d) ? new Date() : d;
 }
 function formatDate(iso) {
-
-  if (!iso) return "";
-
-  var d = toIST(iso);
-
-  var d2 = safeDate(iso); return d2.toLocaleDateString("en-IN", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+  if (!iso) return "Unknown Date";
+  var d = safeDate(iso);
+  return d.toLocaleDateString("en-IN", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+});
 
 }
 

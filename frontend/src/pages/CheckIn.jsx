@@ -385,3 +385,4 @@ function CheckIn({ user }) {
 }
 
 export default CheckIn;
+

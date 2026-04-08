@@ -424,3 +424,4 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
 }
 
 export default Settings;
+

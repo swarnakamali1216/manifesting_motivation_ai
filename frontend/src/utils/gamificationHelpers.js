@@ -76,3 +76,4 @@ export function getXP(xp) {
 export function formatXP(xp) {
   return getXP(xp).toLocaleString();
 }
+

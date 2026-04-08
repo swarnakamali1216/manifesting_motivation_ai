@@ -530,3 +530,4 @@ export default function ChatCoach({ user }) {
     </div>
   );
 }
+

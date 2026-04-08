@@ -46,3 +46,4 @@ function GoalCard({ goal, onUpdate, onMilestone }) {
 }
 
 export default GoalCard;
+

@@ -380,3 +380,4 @@ function Sidebar({ isOpen, onClose, onNavigate, user, activePage, onLogout }) {
 }
 
 export default Sidebar;
+

@@ -41,3 +41,4 @@ export function applyAccent(name) {
 export function getAccent() {
   return localStorage.getItem("accent_color") || "purple";
 }
+

@@ -50,3 +50,4 @@ function ProgressChart({ sessions }) {
 }
 
 export default ProgressChart;
+

@@ -645,3 +645,4 @@ function LeaderboardSection({ userId }) {
 }
 
 export default Badges;
+

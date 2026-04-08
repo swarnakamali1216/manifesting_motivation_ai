@@ -377,3 +377,4 @@ function InviteTab({ user }) {
     </div>
   );
 }
+

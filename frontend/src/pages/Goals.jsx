@@ -823,3 +823,4 @@ function Goals({ user }) {
 }
 
 export default Goals;
+

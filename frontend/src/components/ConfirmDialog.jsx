@@ -70,3 +70,4 @@ function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLab
 }
 
 export default ConfirmDialog;
+

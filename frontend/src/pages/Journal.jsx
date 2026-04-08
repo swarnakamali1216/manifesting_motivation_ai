@@ -532,3 +532,4 @@ function Journal({ user }) {
 }
 
 export default Journal;
+

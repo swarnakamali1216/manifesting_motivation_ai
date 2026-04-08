@@ -130,3 +130,4 @@ function calculateStreak(checkins) {
     atRisk:         finalStreak > 0 && !checkedInToday,
   };
 }
+

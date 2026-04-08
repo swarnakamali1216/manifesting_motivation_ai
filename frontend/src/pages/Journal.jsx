@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 
-var API = "http://localhost:5000/api";
+var API = process.env.REACT_APP_API_URL || "https://manifesting-motivation-backend.onrender.com/api";
 
 var MOODS = [
   { key:"amazing",  emoji:"≡ƒîƒ", label:"Amazing",   color:"#fbbf24", bg:"rgba(251,191,36,0.12)"  },
@@ -197,7 +197,7 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
   useEffect(function(){
     setTimeout(function(){ textRef.current && textRef.current.focus(); }, 100);
     if (!isEdit) setPrompt(PROMPTS[Math.floor(Math.random()*PROMPTS.length)]);
-  },[]);
+  }, [isEdit]);
 
   function toggleTag(t) {
     setSelTags(function(p){ return p.includes(t) ? p.filter(function(x){return x!==t;}) : p.concat(t); });

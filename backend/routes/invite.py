@@ -1,5 +1,5 @@
 """
-routes/invite.py — REDESIGNED
+routes/invite.py â€” REDESIGNED
 - Allow multiple invites to same email address (no duplicate block)
 - Beautiful HTML email with butterfly SVG logo + graphic design
 Place at: backend/routes/invite.py
@@ -40,14 +40,14 @@ def get_sender(user_id):
 def build_email_html(sender_name, sender_email, invite_url):
     """
     Builds a beautiful branded HTML email with butterfly SVG logo.
-    Designed to look professional — like a real product invite.
+    Designed to look professional â€” like a real product invite.
     """
     features = [
-        ("🤖", "AI coach that adapts to your emotions"),
-        ("🎯", "Personalised goal roadmaps, step by step"),
-        ("📔", "Encrypted journal with AI emotional insight"),
-        ("✅", "Daily check-ins with streaks & XP"),
-        ("🏆", "Badges, levels, and gamified growth"),
+        ("ðŸ¤–", "AI coach that adapts to your emotions"),
+        ("ðŸŽ¯", "Personalised goal roadmaps, step by step"),
+        ("ðŸ“”", "Encrypted journal with AI emotional insight"),
+        ("âœ…", "Daily check-ins with streaks & XP"),
+        ("ðŸ†", "Badges, levels, and gamified growth"),
     ]
     rows = "".join(
         f'<tr><td style="padding:8px 0;font-size:14px;color:#c4b5fd;line-height:1.5;">'
@@ -130,14 +130,14 @@ def build_email_html(sender_name, sender_email, invite_url):
 
           <!-- Invitation message -->
           <p style="font-size:22px;font-weight:700;color:#eeeeff;margin:0 0 10px;line-height:1.3;">
-            You've been invited 🦋
+            You've been invited ðŸ¦‹
           </p>
           <p style="color:#9898c0;font-size:15px;line-height:1.75;margin:0 0 24px;">
             <span style="color:#c4b5fd;font-weight:600;">{sender_name}</span>
             {f'<span style="color:#6060a0;font-size:13px;"> &lt;{sender_email}&gt;</span>' if sender_email else ''}
             wants you to join them on
             <span style="color:#eeeeff;font-weight:600;">Manifesting Motivation AI</span>
-            — a personal growth app that helps you set goals, track your mood,
+            â€” a personal growth app that helps you set goals, track your mood,
             and get real AI coaching.
           </p>
 
@@ -166,7 +166,7 @@ def build_email_html(sender_name, sender_email, invite_url):
                        font-size:16px;font-weight:700;letter-spacing:0.02em;
                        box-shadow:0 8px 32px rgba(124,92,252,0.5);
                        border:1px solid rgba(255,255,255,0.1);">
-                Join Free — Start Your Journey ✨
+                Join Free â€” Start Your Journey âœ¨
               </a>
             </td></tr>
           </table>
@@ -185,7 +185,7 @@ def build_email_html(sender_name, sender_email, invite_url):
           <!-- XP reward notice -->
           <div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);
                       border-radius:12px;padding:14px 18px;display:flex;align-items:center;">
-            <span style="font-size:20px;margin-right:12px;">⚡</span>
+            <span style="font-size:20px;margin-right:12px;">âš¡</span>
             <div>
               <p style="color:#4ade80;font-size:13px;font-weight:700;margin:0 0 2px;">
                 Welcome bonus: +25 XP when you sign up
@@ -206,7 +206,7 @@ def build_email_html(sender_name, sender_email, invite_url):
             Invited by <span style="color:#6060a0;">{sender_display}</span>
           </p>
           <p style="color:#2a2a42;font-size:10px;margin:0;line-height:1.8;">
-            Manifesting Motivation AI · Built with 🦋 in India<br/>
+            Manifesting Motivation AI Â· Built with ðŸ¦‹ in India<br/>
             This invite was sent on their behalf. Not interested?
             Simply ignore this email.
           </p>
@@ -245,12 +245,12 @@ def send_invite():
     sender_name, sender_email = get_sender(user_id)
     # APP_URL should be set in .env for production (e.g. https://yourdomain.com)
     # Falls back to localhost:3000 for local development
-    app_url = os.getenv("APP_URL", "http://localhost:3000/").rstrip("/")
+    app_url = os.getenv("APP_URL", "https://manifesting-motivation-ai.vercel.app/").rstrip("/")
     invite_url = f"{app_url}?ref={user_id}"
 
     # Build email
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"🦋 {sender_name} invited you to Manifesting Motivation AI"
+    msg["Subject"] = f"ðŸ¦‹ {sender_name} invited you to Manifesting Motivation AI"
     if sender_email:
         msg["From"]     = f"{sender_name} <{sender_email}>"
         msg["Reply-To"] = f"{sender_name} <{sender_email}>"
@@ -268,7 +268,7 @@ def send_invite():
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(SMTP_USER, to_email, msg.as_string())
 
-        # Record invite in DB — allow duplicates (no unique constraint)
+        # Record invite in DB â€” allow duplicates (no unique constraint)
         try:
             db = SessionLocal()
             db.execute(sql_text(
@@ -280,10 +280,10 @@ def send_invite():
         except Exception as db_err:
             print(f"[invite] DB record skipped: {db_err}")
 
-        print(f"[invite] ✅ {sender_name} → {to_email}")
+        print(f"[invite] âœ… {sender_name} â†’ {to_email}")
         return jsonify({
             "success": True,
-            "message": f"Invite sent to {to_email} ✅",
+            "message": f"Invite sent to {to_email} âœ…",
             "from":    sender_email or SMTP_USER,
             "to":      to_email
         })
@@ -293,7 +293,7 @@ def send_invite():
     except smtplib.SMTPRecipientsRefused:
         return jsonify({"error": f"Invalid recipient email: {to_email}"}), 400
     except Exception as e:
-        print(f"[invite] ❌ {e}")
+        print(f"[invite] âŒ {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -304,13 +304,13 @@ def test_config():
         "configured":  configured,
         "smtp_user":   SMTP_USER[:10] + "***" if SMTP_USER else "NOT SET",
         "pass_length": len(SMTP_PASS),
-        "message":     "Ready ✅" if configured else "Add SMTP_USER + SMTP_PASS to .env"
+        "message":     "Ready âœ…" if configured else "Add SMTP_USER + SMTP_PASS to .env"
     })
 
 @invite_bp.route("/invite/link/<int:user_id>", methods=["GET"])
 def get_invite_link(user_id):
     """Return the invite link for a user."""
-    link = f"http://localhost:3000/?ref={user_id}&mode=signup"
+    link = f"https://manifesting-motivation-ai.vercel.app/?ref={user_id}&mode=signup"
     return jsonify({"link": link, "user_id": user_id})
 
 

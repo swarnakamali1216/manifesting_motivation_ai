@@ -4,14 +4,14 @@ import axios from "axios";
 var API = process.env.REACT_APP_API_URL || "https://manifesting-motivation-backend.onrender.com/api";
 
 var MOODS = [
-  { key:"amazing",  emoji:"🌟", label:"Amazing",   color:"#fbbf24", bg:"rgba(251,191,36,0.12)"  },
-  { key:"good",     emoji:"😊", label:"Good",      color:"#4ade80", bg:"rgba(74,222,128,0.12)"  },
-  { key:"okay",     emoji:"😐", label:"Okay",      color:"#60a5fa", bg:"rgba(96,165,250,0.12)"  },
-  { key:"low",      emoji:"😔", label:"Low",       color:"#a78bfa", bg:"rgba(167,139,250,0.12)" },
-  { key:"anxious",  emoji:"😰", label:"Anxious",   color:"#fb923c", bg:"rgba(251,146,60,0.12)"  },
-  { key:"grateful", emoji:"🙏", label:"Grateful",  color:"#34d399", bg:"rgba(52,211,153,0.12)"  },
-  { key:"angry",    emoji:"😤", label:"Frustrated",color:"#f87171", bg:"rgba(248,113,113,0.12)" },
-  { key:"excited",  emoji:"⚡", label:"Excited",   color:"#c084fc", bg:"rgba(192,132,252,0.12)" },
+  { key:"amazing",  emoji:"ðŸŒŸ", label:"Amazing",   color:"#fbbf24", bg:"rgba(251,191,36,0.12)"  },
+  { key:"good",     emoji:"ðŸ˜Š", label:"Good",      color:"#4ade80", bg:"rgba(74,222,128,0.12)"  },
+  { key:"okay",     emoji:"ðŸ˜", label:"Okay",      color:"#60a5fa", bg:"rgba(96,165,250,0.12)"  },
+  { key:"low",      emoji:"ðŸ˜”", label:"Low",       color:"#a78bfa", bg:"rgba(167,139,250,0.12)" },
+  { key:"anxious",  emoji:"ðŸ˜°", label:"Anxious",   color:"#fb923c", bg:"rgba(251,146,60,0.12)"  },
+  { key:"grateful", emoji:"ðŸ™", label:"Grateful",  color:"#34d399", bg:"rgba(52,211,153,0.12)"  },
+  { key:"angry",    emoji:"ðŸ˜¤", label:"Frustrated",color:"#f87171", bg:"rgba(248,113,113,0.12)" },
+  { key:"excited",  emoji:"âš¡", label:"Excited",   color:"#c084fc", bg:"rgba(192,132,252,0.12)" },
 ];
 
 var TAGS = ["Personal","Goals","Gratitude","Reflection","Health","Work","Learning","Relationships","Win","Challenge"];
@@ -50,7 +50,7 @@ function getMood(key) {
   return MOODS.find(function(m){ return m.key===key; }) || null;
 }
 
-// ── Mood Streak ───────────────────────────────────────────────
+// â”€â”€ Mood Streak â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function MoodStreak({ entries }) {
   var IST_MS = 330 * 60000;
   var days = {};
@@ -74,7 +74,7 @@ function MoodStreak({ entries }) {
         return (
           <div key={r.key} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"3px" }}>
             <div style={{ fontSize:"14px", lineHeight:1, opacity:r.mood?1:0.2 }} title={r.key}>
-              {m ? m.emoji : "○"}
+              {m ? m.emoji : "â—‹"}
             </div>
             <div style={{ fontSize:"8px", color:"var(--muted)", fontWeight:"700", fontFamily:"'Syne',sans-serif" }}>{r.dayLabel}</div>
           </div>
@@ -84,7 +84,7 @@ function MoodStreak({ entries }) {
   );
 }
 
-// ── Entry Card ────────────────────────────────────────────────
+// â”€â”€ Entry Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function EntryCard({ entry, onDelete, onEdit }) {
   var [expanded, setExpanded] = useState(false);
   var [confirmDel, setConfirmDel] = useState(false);
@@ -115,9 +115,9 @@ function EntryCard({ entry, onDelete, onEdit }) {
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:"6px", marginTop:"2px" }}>
               <span style={{ fontSize:"10px", color:"var(--muted)" }}>{formatDate(entry.created_at)}</span>
-              <span style={{ fontSize:"10px", color:"var(--muted)" }}>·</span>
+              <span style={{ fontSize:"10px", color:"var(--muted)" }}>Â·</span>
               <span style={{ fontSize:"10px", color:"var(--muted)" }}>{formatTime(entry.created_at)}</span>
-              <span style={{ fontSize:"10px", color:"var(--muted)" }}>·</span>
+              <span style={{ fontSize:"10px", color:"var(--muted)" }}>Â·</span>
               <span style={{ fontSize:"10px", color:"var(--muted)" }}>{wordCount(entry.content)} words</span>
               {mood && <span style={{ fontSize:"10px", color:mood.color, fontWeight:"700" }}>{mood.label}</span>}
             </div>
@@ -142,7 +142,7 @@ function EntryCard({ entry, onDelete, onEdit }) {
           ) : (
             <button onClick={function(){ setConfirmDel(true); }}
               style={{ padding:"4px 8px", borderRadius:"7px", border:"1px solid var(--border)", background:"transparent", color:"var(--muted)", fontSize:"10px", cursor:"pointer" }}>
-              🗑
+              ðŸ—‘
             </button>
           )}
         </div>
@@ -163,7 +163,7 @@ function EntryCard({ entry, onDelete, onEdit }) {
         {isLong && (
           <button onClick={function(){ setExpanded(function(v){return !v;}); }}
             style={{ marginTop:"6px", fontSize:"11px", color:"var(--accent)", background:"none", border:"none", cursor:"pointer", fontWeight:"600", padding:0, fontFamily:"'DM Sans',sans-serif" }}>
-            {expanded ? "Show less ↑" : "Read more ↓"}
+            {expanded ? "Show less â†‘" : "Read more â†“"}
           </button>
         )}
       </div>
@@ -175,7 +175,7 @@ function EntryCard({ entry, onDelete, onEdit }) {
   );
 }
 
-// ── Write / Edit Modal ────────────────────────────────────────
+// â”€â”€ Write / Edit Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function WriteModal({ user, editEntry, onClose, onSaved }) {
   var isEdit = !!editEntry;
   var [title,   setTitle]   = useState(editEntry ? editEntry.title   || "" : "");
@@ -191,7 +191,7 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
     if (!isEdit) setPrompt(PROMPTS[Math.floor(Math.random()*PROMPTS.length)]);
 
  
-  }, [isEdit]); // ✅ add isEdit here
+  }, [isEdit]); // âœ… add isEdit here
   function toggleTag(t) {
     setSelTags(function(p){ return p.includes(t) ? p.filter(function(x){return x!==t;}) : p.concat(t); });
   }
@@ -214,7 +214,7 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
       onClose();
     }).catch(function(e){
       console.error(e);
-      alert("Save failed — check Flask terminal");
+      alert("Save failed â€” check Flask terminal");
     }).finally(function(){ setSaving(false); });
   }
 
@@ -234,11 +234,11 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
       }}>
         <div style={{ padding:"16px 20px 12px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:"1px solid var(--border)" }}>
           <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:"900", fontSize:"16px", color:"var(--text)" }}>
-            {isEdit ? "✏️ Edit Entry" : "✍️ New Entry"}
+            {isEdit ? "âœï¸ Edit Entry" : "âœï¸ New Entry"}
           </div>
           <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
             <span style={{ fontSize:"10px", color:"var(--muted)" }}>{wordCount(content)} words</span>
-            <button onClick={onClose} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:"18px", cursor:"pointer", lineHeight:1 }}>×</button>
+            <button onClick={onClose} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:"18px", cursor:"pointer", lineHeight:1 }}>Ã—</button>
           </div>
         </div>
 
@@ -246,7 +246,7 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
           {!isEdit && prompt && (
             <div style={{ background:"rgba(124,92,252,0.06)", border:"1px solid rgba(124,92,252,0.15)", borderRadius:"12px", padding:"10px 14px", marginBottom:"14px", cursor:"pointer" }}
               onClick={function(){ setContent(function(p){ return p ? p+"\n\n"+prompt : prompt; }); setPrompt(null); }}>
-              <div style={{ fontSize:"9px", color:"var(--accent)", fontWeight:"800", fontFamily:"'Syne',sans-serif", marginBottom:"3px" }}>💡 TODAY'S PROMPT — tap to use</div>
+              <div style={{ fontSize:"9px", color:"var(--accent)", fontWeight:"800", fontFamily:"'Syne',sans-serif", marginBottom:"3px" }}>ðŸ’¡ TODAY'S PROMPT â€” tap to use</div>
               <div style={{ fontSize:"12px", color:"var(--text2)", lineHeight:"1.5" }}>{prompt}</div>
             </div>
           )}
@@ -275,7 +275,7 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
 
           <textarea
             ref={textRef}
-            placeholder={"Write freely... your thoughts are safe here.\n\nThis is your private space — be honest with yourself."}
+            placeholder={"Write freely... your thoughts are safe here.\n\nThis is your private space â€” be honest with yourself."}
             value={content}
             onChange={function(e){ setContent(e.target.value); }}
             style={{ width:"100%", boxSizing:"border-box", minHeight:"200px", background:"var(--card)", border:"1px solid var(--border)", borderRadius:"12px", padding:"14px", fontSize:"14px", fontFamily:"'DM Sans',sans-serif", lineHeight:"1.8", color:"var(--text)", resize:"vertical", outline:"none", marginBottom:"12px" }}
@@ -299,7 +299,7 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
 
         <div style={{ padding:"12px 20px", borderTop:"1px solid var(--border)", display:"flex", justifyContent:"space-between", alignItems:"center", background:"var(--surface)" }}>
           <div style={{ fontSize:"10px", color:"var(--muted)", display:"flex", alignItems:"center", gap:"5px" }}>
-            🔒 <span>Private & encrypted — only you can see this</span>
+            ðŸ”’ <span>Private & encrypted â€” only you can see this</span>
           </div>
           <div style={{ display:"flex", gap:"8px" }}>
             <button onClick={onClose}
@@ -308,7 +308,7 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
             </button>
             <button onClick={save} disabled={saving||!content.trim()}
               style={{ padding:"9px 22px", borderRadius:"10px", border:"none", background:"linear-gradient(135deg,#7c5cfc,#9c7cfc)", color:"#fff", fontSize:"12px", cursor:"pointer", fontFamily:"'Syne',sans-serif", fontWeight:"800", opacity:(saving||!content.trim())?0.5:1, boxShadow:"0 3px 12px rgba(124,92,252,0.3)" }}>
-              {saving ? "Saving..." : isEdit ? "Update ✓" : "Save Entry ✓"}
+              {saving ? "Saving..." : isEdit ? "Update âœ“" : "Save Entry âœ“"}
             </button>
           </div>
         </div>
@@ -317,9 +317,9 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // MAIN JOURNAL PAGE
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function Journal({ user }) {
   var [entries,    setEntries]    = useState([]);
   var [loading,    setLoading]    = useState(true);
@@ -372,7 +372,7 @@ function Journal({ user }) {
   var streakDays  = new Set(entries.map(function(e){
     if (!e.created_at) return "";
     var ts = new Date(e.created_at.replace(" ", "T") + (e.created_at.includes("T") ? "" : "Z")).getTime();
-    return new Date(ts + IST_MS2).toISOString().slice(0,10);
+    var d = new Date(ts + IST_MS2); return isNaN(d) ? "" : d.toISOString().slice(0,10);
   }).filter(function(d){ return d.length === 10; })).size;
 
   var groups = {};
@@ -407,22 +407,22 @@ function Journal({ user }) {
           </div>
           <button onClick={handleNew}
             style={{ display:"flex", alignItems:"center", gap:"6px", padding:"10px 18px", borderRadius:"12px", border:"none", background:"linear-gradient(135deg,#7c5cfc,#9c7cfc)", color:"#fff", fontFamily:"'Syne',sans-serif", fontWeight:"800", fontSize:"13px", cursor:"pointer", boxShadow:"0 3px 14px rgba(124,92,252,0.3)", flexShrink:0 }}>
-            ✍️ Write
+            âœï¸ Write
           </button>
         </div>
         <div style={{ display:"inline-flex", alignItems:"center", gap:"5px", background:"rgba(74,222,128,0.08)", border:"1px solid rgba(74,222,128,0.2)", borderRadius:"8px", padding:"4px 10px", marginTop:"4px" }}>
-          <span style={{ fontSize:"10px" }}>🔒</span>
-          <span style={{ fontSize:"10px", color:"#4ade80", fontWeight:"700", fontFamily:"'Syne',sans-serif" }}>Private & Secure — only you can read this</span>
+          <span style={{ fontSize:"10px" }}>ðŸ”’</span>
+          <span style={{ fontSize:"10px", color:"#4ade80", fontWeight:"700", fontFamily:"'Syne',sans-serif" }}>Private & Secure â€” only you can read this</span>
         </div>
       </div>
 
       {entries.length > 0 && (
         <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"8px", marginBottom:"14px" }}>
           {[
-            { v:posCount,       l:"Positive",   c:"#4ade80", e:"😊" },
-            { v:toughCount,     l:"Tough",       c:"#f87171", e:"💪" },
-            { v:streakDays+"d", l:"Streak",      c:"#fb923c", e:"🔥" },
-            { v:totalWords,     l:"Words",       c:"#60a5fa", e:"✍️" },
+            { v:posCount,       l:"Positive",   c:"#4ade80", e:"ðŸ˜Š" },
+            { v:toughCount,     l:"Tough",       c:"#f87171", e:"ðŸ’ª" },
+            { v:streakDays+"d", l:"Streak",      c:"#fb923c", e:"ðŸ”¥" },
+            { v:totalWords,     l:"Words",       c:"#60a5fa", e:"âœï¸" },
           ].map(function(s){
             return (
               <div key={s.l} style={{ background:"var(--card)", border:"1px solid var(--border)", borderRadius:"14px", padding:"12px 10px", textAlign:"center" }}>
@@ -445,7 +445,7 @@ function Journal({ user }) {
         <div style={{ marginBottom:"12px", display:"flex", flexDirection:"column", gap:"8px" }}>
           <input
             className="j-input"
-            placeholder="🔍 Search entries..."
+            placeholder="ðŸ” Search entries..."
             value={search}
             onChange={function(e){ setSearch(e.target.value); }}
             style={{ width:"100%", boxSizing:"border-box", borderRadius:"10px", padding:"9px 14px", fontSize:"13px", fontFamily:"'DM Sans',sans-serif" }}
@@ -466,7 +466,7 @@ function Journal({ user }) {
             <div style={{ width:"1px", background:"var(--border)", flexShrink:0, margin:"0 2px" }} />
             <button onClick={function(){ setSortDir(function(v){return v==="desc"?"asc":"desc";}); }}
               style={{ padding:"5px 11px", borderRadius:"8px", border:"1px solid var(--border)", background:"transparent", color:"var(--muted)", fontSize:"11px", cursor:"pointer", whiteSpace:"nowrap", fontWeight:"700" }}>
-              {sortDir==="desc"?"↓ Newest":"↑ Oldest"}
+              {sortDir==="desc"?"â†“ Newest":"â†‘ Oldest"}
             </button>
           </div>
           <div style={{ display:"flex", gap:"5px", flexWrap:"wrap" }}>
@@ -487,14 +487,14 @@ function Journal({ user }) {
         <div style={{ textAlign:"center", padding:"40px", color:"var(--muted)", fontSize:"13px" }}>Loading your journal...</div>
       ) : filtered.length === 0 && entries.length === 0 ? (
         <div style={{ textAlign:"center", padding:"48px 20px", background:"var(--card)", borderRadius:"20px", border:"1px solid var(--border)" }}>
-          <div style={{ fontSize:"48px", marginBottom:"12px" }}>📖</div>
+          <div style={{ fontSize:"48px", marginBottom:"12px" }}>ðŸ“–</div>
           <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:"800", fontSize:"16px", color:"var(--text)", marginBottom:"6px" }}>Your journal is empty</div>
           <div style={{ fontSize:"13px", color:"var(--muted)", marginBottom:"20px", lineHeight:"1.6" }}>
             Writing regularly helps you understand your emotions,<br/>track your growth, and stay connected to your goals.
           </div>
           <button onClick={handleNew}
             style={{ padding:"11px 28px", borderRadius:"12px", border:"none", background:"linear-gradient(135deg,#7c5cfc,#9c7cfc)", color:"#fff", fontFamily:"'Syne',sans-serif", fontWeight:"800", fontSize:"14px", cursor:"pointer", boxShadow:"0 3px 14px rgba(124,92,252,0.3)" }}>
-            ✍️ Write Your First Entry
+            âœï¸ Write Your First Entry
           </button>
         </div>
       ) : filtered.length === 0 ? (

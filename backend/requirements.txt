@@ -10,3 +10,5 @@ python-dotenv==1.0.0
 psycopg2-binary
 requests
 # force rebuild 20260408-124739
+
+httpx==0.27.0

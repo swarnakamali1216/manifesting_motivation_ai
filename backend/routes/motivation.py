@@ -1,4 +1,4 @@
-"""
+﻿"""
 routes/motivation.py
 EXPANDED TOPIC DETECTION — detects all question types:
   weather, news, datetime, career, academic, health, fitness,
@@ -492,3 +492,4 @@ def daily_quote():
         return jsonify({"quote": resp.choices[0].message.content.strip().strip('"').strip("'")})
     except Exception as e:
         return jsonify({"quote":"Every step forward is progress. Keep going.","error":str(e)})
+

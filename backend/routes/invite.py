@@ -1,12 +1,11 @@
 """
 routes/invite.py — FIXED
-FIXES:
-1. CORS headers added explicitly on /invite/send (was blocking from Vercel)
-2. SMTP timeout=15 added to prevent 502 worker timeout
-3. Both data.get("email") and data.get("to_email") accepted
+- Removed manual _cors() helper (app.py flask-cors handles it globally)
+- SMTP timeout=15 to prevent 502
+- Accepts both "email" and "to_email" fields
 """
 import os
-from flask import Blueprint, request, jsonify, make_response
+from flask import Blueprint, request, jsonify
 import smtplib, ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -21,14 +20,6 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 SMTP_USER = os.getenv("SMTP_USER", "").strip()
 SMTP_PASS = os.getenv("SMTP_PASS", "").replace(" ", "").strip()
-
-
-def _cors(response):
-    """Add CORS headers to any response."""
-    response.headers["Access-Control-Allow-Origin"]  = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    return response
 
 
 def get_sender(user_id):
@@ -148,29 +139,22 @@ def build_email_html(sender_name, sender_email, invite_url):
     return html
 
 
-# ── OPTIONS preflight — required for CORS from Vercel ──────────────────
-@invite_bp.route("/invite/send", methods=["OPTIONS"])
-def invite_send_options():
-    """Handle CORS preflight."""
-    resp = make_response("", 204)
-    return _cors(resp)
-
-
-@invite_bp.route("/invite/send", methods=["POST"])
+@invite_bp.route("/invite/send", methods=["POST", "OPTIONS"])
 def send_invite():
+    # Handle preflight
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+
     data     = request.get_json() or {}
     to_email = (data.get("email") or data.get("to_email") or "").strip()
     user_id  = data.get("user_id")
 
     if not to_email or "@" not in to_email:
-        resp = make_response(jsonify({"error": "Enter a valid email address"}), 400)
-        return _cors(resp)
+        return jsonify({"error": "Enter a valid email address"}), 400
     if not user_id:
-        resp = make_response(jsonify({"error": "user_id required"}), 400)
-        return _cors(resp)
+        return jsonify({"error": "user_id required"}), 400
     if not SMTP_USER or not SMTP_PASS:
-        resp = make_response(jsonify({"error": "SMTP not configured in .env"}), 500)
-        return _cors(resp)
+        return jsonify({"error": "SMTP not configured in .env"}), 500
 
     sender_name, sender_email = get_sender(user_id)
     app_url    = os.getenv("APP_URL", "https://manifesting-motivation-ai.vercel.app").rstrip("/")
@@ -189,7 +173,7 @@ def send_invite():
 
     try:
         ctx = ssl.create_default_context()
-        # FIX: timeout=15 prevents 502 Gunicorn worker timeout on slow SMTP
+        # timeout=15 prevents 502 Gunicorn worker timeout on slow SMTP
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=15) as server:
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(SMTP_USER, to_email, msg.as_string())
@@ -206,43 +190,37 @@ def send_invite():
             print(f"[invite] DB record skipped: {db_err}")
 
         print(f"[invite] ✅ {sender_name} → {to_email}")
-        resp = make_response(jsonify({
+        return jsonify({
             "success": True,
             "message": f"Invite sent to {to_email} ✅",
             "from":    sender_email or SMTP_USER,
             "to":      to_email
-        }))
-        return _cors(resp)
+        })
 
     except smtplib.SMTPAuthenticationError:
-        resp = make_response(jsonify({"error": "Gmail App Password wrong. Check SMTP_PASS in .env"}), 401)
-        return _cors(resp)
+        return jsonify({"error": "Gmail App Password wrong. Check SMTP_PASS in .env"}), 401
     except smtplib.SMTPRecipientsRefused:
-        resp = make_response(jsonify({"error": f"Invalid recipient email: {to_email}"}), 400)
-        return _cors(resp)
+        return jsonify({"error": f"Invalid recipient email: {to_email}"}), 400
     except Exception as e:
         print(f"[invite] ❌ {e}")
-        resp = make_response(jsonify({"error": str(e)}), 500)
-        return _cors(resp)
+        return jsonify({"error": str(e)}), 500
 
 
 @invite_bp.route("/invite/test", methods=["GET"])
 def test_config():
     configured = bool(SMTP_USER and SMTP_PASS)
-    resp = make_response(jsonify({
+    return jsonify({
         "configured":  configured,
         "smtp_user":   SMTP_USER[:10] + "***" if SMTP_USER else "NOT SET",
         "pass_length": len(SMTP_PASS),
         "message":     "Ready ✅" if configured else "Add SMTP_USER + SMTP_PASS to .env"
-    }))
-    return _cors(resp)
+    })
 
 
 @invite_bp.route("/invite/link/<int:user_id>", methods=["GET"])
 def get_invite_link(user_id):
     link = f"https://manifesting-motivation-ai.vercel.app/?ref={user_id}&mode=signup"
-    resp = make_response(jsonify({"link": link, "user_id": user_id}))
-    return _cors(resp)
+    return jsonify({"link": link, "user_id": user_id})
 
 
 @invite_bp.route("/invite/stats/<int:user_id>", methods=["GET"])
@@ -253,10 +231,8 @@ def get_invite_stats(user_id):
             "SELECT COUNT(*) FROM invites WHERE inviter_id=:uid"
         ), {"uid": user_id}).fetchone()
         count = row[0] if row else 0
-        resp = make_response(jsonify({"total_invites": count, "user_id": user_id, "xp_earned": count * 50}))
-        return _cors(resp)
+        return jsonify({"total_invites": count, "user_id": user_id, "xp_earned": count * 50})
     except Exception:
-        resp = make_response(jsonify({"total_invites": 0, "user_id": user_id, "xp_earned": 0}))
-        return _cors(resp)
+        return jsonify({"total_invites": 0, "user_id": user_id, "xp_earned": 0})
     finally:
         db.close()

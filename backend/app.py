@@ -1,5 +1,5 @@
 ﻿"""
-Manifesting Motivation AI � Backend
+Manifesting Motivation AI — Backend
 KEY FIX: admin_bp registered at /api (routes use /admin/... prefix internally)
          privacy_bp registered at /api/privacy (routes use /export etc)
 """
@@ -12,7 +12,6 @@ load_dotenv()
 app = Flask(__name__)
 
 # -- CORS: single configuration only --------------------------
-# ? REMOVED: after_request hook that added duplicate Access-Control-Allow-Origin: *
 CORS(app,
      origins=[
          "http://localhost:3000",
@@ -23,14 +22,6 @@ CORS(app,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 
-
-
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS')
-    return response
 
 def _find_bp(module_path):
     """Auto-detect any Flask Blueprint in a module."""
@@ -50,12 +41,12 @@ def load(name, module_path, bp_name, prefix):
         mod = importlib.import_module(module_path)
         bp  = getattr(mod, bp_name, None) or _find_bp(module_path)
         if bp is None:
-            print(f"??  {name}: no blueprint found in {module_path}")
+            print(f"⚠️  {name}: no blueprint found in {module_path}")
             return
         app.register_blueprint(bp, url_prefix=prefix)
-        print(f"? {name}")
+        print(f"✅ {name}")
     except Exception as e:
-        print(f"??  {name}: {e}")
+        print(f"⚠️  {name}: {e}")
 
 
 # -- Core routes -----------------------------------------------
@@ -66,12 +57,10 @@ load("journal",           "routes.journal",           "journal_bp",        "/api
 load("checkin",           "routes.checkin",           "checkin_bp",        "/api")
 load("gamification",      "routes.gamification",      "gamification_bp",   "/api")
 load("history",           "routes.history",           "history_bp",        "/api")
-# ? FIX: admin registered at /api so @admin_bp.route("/admin/users") ? GET /api/admin/users ?
 load("admin",             "routes.admin",             "admin_bp",          "/api")
 load("invite",            "routes.invite",            "invite_bp",         "/api")
 load("elevenlabs",        "routes.elevenlabs",        "elevenlabs_bp",     "/api")
 load("memory",            "routes.memory",            "memory_bp",         "/api")
-# ? FIX: privacy registered at /api/privacy so @privacy_bp.route("/export") ? GET /api/privacy/export ?
 load("privacy",           "routes.privacy",           "privacy_bp",        "/api/privacy")
 load("predictor",         "routes.predictor",         "predictor_bp",      "/api")
 load("db_health",         "routes.db_health",         "db_health_bp",      "/api/db")
@@ -79,7 +68,6 @@ load("realtime",          "routes.realtime",          "realtime_bp",       "/api
 load("rag_resources",     "routes.rag_resources",     "rag_bp",            "/api/rag")
 load("recursive_roadmap", "routes.recursive_roadmap", "recursive_bp",      "/api/recursive")
 load("google",            "routes.google_auth",       "google_auth_bp",    "/api")
-# ? Auto-detect blueprint names for these (fixes 4 warnings)
 load("weekly_report",     "routes.weekly_report",     "weekly_report_bp",  "/api/report")
 load("spaced_repetition", "routes.spaced_repetition", "spaced_bp",         "/api")
 load("adaptive_goals",    "routes.adaptive_goals",    "adaptive_goals_bp", "/api")
@@ -109,30 +97,29 @@ def list_routes():
 try:
     from models import Base, engine
     Base.metadata.create_all(bind=engine)
-    print("? All tables created / verified")
+    print("✅ All tables created / verified")
 except Exception as e:
-    print(f"? DB init error: {e}")
+    print(f"❌ DB init error: {e}")
 
 try:
     from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
     SentimentIntensityAnalyzer()
-    print("? VADER sentiment loaded")
+    print("✅ VADER sentiment loaded")
 except Exception as e:
-    print(f"??  VADER: {e}")
+    print(f"⚠️  VADER: {e}")
 
 if __name__ == "__main__":
-    groq   = "?" if os.getenv("GROQ_API_KEY")      else "?"
-    eleven = "?" if os.getenv("ELEVENLABS_API_KEY") else "?"
+    groq   = "✅" if os.getenv("GROQ_API_KEY")      else "❌"
+    eleven = "✅" if os.getenv("ELEVENLABS_API_KEY") else "❌"
     smtp   = os.getenv("SMTP_USER", "")
     print(f"""
 =======================================================
-  ?  Manifesting Motivation AI � Backend Running!
-  ??  http://localhost:5000
-  ??  Groq:       {groq}
-  ??  ElevenLabs: {eleven}
-  ??  SMTP:       {"? " + smtp[:28] if smtp else "??  Not configured"}
-  ??  Routes:     http://localhost:5000/api/routes
+  🦋  Manifesting Motivation AI — Backend Running!
+  🌐  http://localhost:5000
+  🤖  Groq:       {groq}
+  🎙️  ElevenLabs: {eleven}
+  📧  SMTP:       {"✅ " + smtp[:28] if smtp else "❌  Not configured"}
+  🗺️  Routes:     http://localhost:5000/api/routes
 =======================================================
 """)
     app.run(host="0.0.0.0", port=5000, debug=False)
-

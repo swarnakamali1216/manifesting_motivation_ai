@@ -1,15 +1,11 @@
 """
-routes/invite.py — FIXED v3
-- Port 587 + STARTTLS instead of 465 SSL (Render blocks port 465)
+routes/invite.py — RESEND VERSION
+- Uses Resend HTTP API instead of SMTP (no port issues on Render free tier)
 - No manual _cors() — app.py flask-cors handles it
-- SMTP timeout=15 to prevent 502
-- Accepts both "email" and "to_email" fields
 """
 import os
+import resend
 from flask import Blueprint, request, jsonify
-import smtplib, ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from models import SessionLocal
 from sqlalchemy import text as sql_text
 from dotenv import load_dotenv
@@ -17,10 +13,8 @@ load_dotenv()
 
 invite_bp = Blueprint("invite", __name__)
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))   # 587 STARTTLS — works on Render
-SMTP_USER = os.getenv("SMTP_USER", "").strip()
-SMTP_PASS = os.getenv("SMTP_PASS", "").replace(" ", "").strip()
+resend.api_key = os.getenv("RESEND_API_KEY", "")
+FROM_EMAIL = os.getenv("RESEND_FROM", "Manifesting Motivation <onboarding@resend.dev>")
 
 
 def get_sender(user_id):
@@ -68,7 +62,7 @@ def build_email_html(sender_name, sender_email, invite_url):
 
     sender_display = f"{sender_name} ({sender_email})" if sender_email else sender_name
 
-    html = f"""<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
@@ -137,7 +131,6 @@ def build_email_html(sender_name, sender_email, invite_url):
   </table>
 </body>
 </html>"""
-    return html
 
 
 @invite_bp.route("/invite/send", methods=["POST", "OPTIONS"])
@@ -153,34 +146,27 @@ def send_invite():
         return jsonify({"error": "Enter a valid email address"}), 400
     if not user_id:
         return jsonify({"error": "user_id required"}), 400
-    if not SMTP_USER or not SMTP_PASS:
-        return jsonify({"error": "SMTP not configured in .env"}), 500
+    if not resend.api_key:
+        return jsonify({"error": "RESEND_API_KEY not configured in environment"}), 500
 
     sender_name, sender_email = get_sender(user_id)
     app_url    = os.getenv("APP_URL", "https://manifesting-motivation-ai.vercel.app").rstrip("/")
     invite_url = f"{app_url}?ref={user_id}"
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"🦋 {sender_name} invited you to Manifesting Motivation AI"
-    if sender_email:
-        msg["From"]     = f"{sender_name} <{sender_email}>"
-        msg["Reply-To"] = f"{sender_name} <{sender_email}>"
-    else:
-        msg["From"] = f"{sender_name} via Manifesting Motivation <{SMTP_USER}>"
-    msg["To"]     = to_email
-    msg["Sender"] = f"Manifesting Motivation <{SMTP_USER}>"
-    msg.attach(MIMEText(build_email_html(sender_name, sender_email, invite_url), "html"))
-
     try:
-        ctx = ssl.create_default_context()
-        # ✅ STARTTLS on port 587 — works on Render (port 465 SSL is blocked)
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-            server.ehlo()
-            server.starttls(context=ctx)
-            server.ehlo()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_USER, to_email, msg.as_string())
+        params = {
+            "from":    FROM_EMAIL,
+            "to":      [to_email],
+            "subject": f"🦋 {sender_name} invited you to Manifesting Motivation AI",
+            "html":    build_email_html(sender_name, sender_email, invite_url),
+        }
+        if sender_email:
+            params["reply_to"] = sender_email
 
+        response = resend.Emails.send(params)
+        print(f"[invite] ✅ Resend: {sender_name} → {to_email} | id={response.get('id','?')}")
+
+        # Record in DB
         try:
             db = SessionLocal()
             db.execute(sql_text(
@@ -192,32 +178,24 @@ def send_invite():
         except Exception as db_err:
             print(f"[invite] DB record skipped: {db_err}")
 
-        print(f"[invite] ✅ {sender_name} → {to_email}")
         return jsonify({
             "success": True,
             "message": f"Invite sent to {to_email} ✅",
-            "from":    sender_email or SMTP_USER,
             "to":      to_email
         })
 
-    except smtplib.SMTPAuthenticationError:
-        return jsonify({"error": "Gmail App Password wrong. Check SMTP_PASS in .env"}), 401
-    except smtplib.SMTPRecipientsRefused:
-        return jsonify({"error": f"Invalid recipient email: {to_email}"}), 400
     except Exception as e:
-        print(f"[invite] ❌ {e}")
+        print(f"[invite] ❌ Resend error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @invite_bp.route("/invite/test", methods=["GET"])
 def test_config():
-    configured = bool(SMTP_USER and SMTP_PASS)
+    configured = bool(resend.api_key)
     return jsonify({
-        "configured":  configured,
-        "smtp_user":   SMTP_USER[:10] + "***" if SMTP_USER else "NOT SET",
-        "pass_length": len(SMTP_PASS),
-        "smtp_port":   SMTP_PORT,
-        "message":     "Ready ✅" if configured else "Add SMTP_USER + SMTP_PASS to .env"
+        "configured": configured,
+        "from":       FROM_EMAIL,
+        "message":    "Ready ✅" if configured else "Add RESEND_API_KEY to environment"
     })
 
 

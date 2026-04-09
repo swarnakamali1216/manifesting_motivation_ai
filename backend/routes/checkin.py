@@ -11,7 +11,7 @@ load_dotenv()
 checkin_bp = Blueprint("checkin", __name__)
 def get_groq():
     return Groq(api_key=os.getenv('GROQ_API_KEY'))
-analyzer   = SentimentIntensityAnalyzer()
+analyzer = SentimentIntensityAnalyzer()
 
 IST = 330  # UTC+5:30 minutes
 
@@ -30,37 +30,24 @@ def ist_date(dt):
     return to_ist(dt).date()
 
 
-# ── Helper: detect which table name exists ──────────────────────────────
 def _checkin_table(db):
-    """
-    Returns the actual check-ins table name in your DB.
-    Tries 'check_ins' first, then 'checkins'.
-    """
     for tbl in ["check_ins", "checkins"]:
         try:
             result = db.execute(sql_text(
-                "SELECT 1 FROM information_schema.tables "
-                "WHERE table_name=:t LIMIT 1"
+                "SELECT 1 FROM information_schema.tables WHERE table_name=:t LIMIT 1"
             ), {"t": tbl}).fetchone()
             if result:
-                print(f"[checkin] Using table: {tbl}")
                 return tbl
         except Exception:
             pass
-    # fallback
     return "check_ins"
 
 
-# ── Helper: collect all unique activity dates for a user ────────────────
 def _all_activity_dates(db, user_id):
     from datetime import date as _date, datetime as _dt
     dates = set()
-
-    # Use detected table name for check-ins
     checkin_tbl = _checkin_table(db)
-    activity_tables = ["motivation_sessions", checkin_tbl, "journal_entries"]
-
-    for tbl in activity_tables:
+    for tbl in ["motivation_sessions", checkin_tbl, "journal_entries"]:
         try:
             rows = db.execute(sql_text(
                 f"SELECT DISTINCT DATE(created_at) FROM {tbl} WHERE user_id=:uid AND created_at IS NOT NULL"
@@ -98,157 +85,127 @@ def _calc_streak(sorted_dates_desc):
 # ── POST /api/checkin ────────────────────────────────────────────────────
 @checkin_bp.route("/checkin", methods=["POST"])
 def do_checkin():
-    db = None
+    data    = request.get_json() or {}
+    user_id = data.get("user_id")
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+    mood = data.get("mood", "neutral")
+    note = data.get("note", "")
+
+    # ── Step 1: Get AI reply (no DB needed) ─────────────────────────────
+    memory_ctx = ""
+    recent_ctx = ""
+    db_ctx = SessionLocal()
     try:
-        data    = request.get_json()
-        user_id = data.get("user_id")
-        if not user_id:
-            return jsonify({"error": "user_id required"}), 400
-        mood = data.get("mood", "neutral")
-        note = data.get("note", "")
+        mem = db_ctx.execute(sql_text(
+            "SELECT memory_text FROM ai_memory WHERE user_id=:uid LIMIT 1"
+        ), {"uid": user_id}).fetchone()
+        if mem and mem[0]:
+            memory_ctx = "What I know about this user: " + mem[0][:300] + "\n"
+    except Exception: pass
+    try:
+        r = db_ctx.execute(sql_text(
+            "SELECT emotion FROM motivation_sessions WHERE user_id=:uid ORDER BY created_at DESC LIMIT 3"
+        ), {"uid": user_id}).fetchall()
+        if r: recent_ctx = "Recent mood: " + ", ".join([x[0] for x in r if x[0]]) + "\n"
+    except Exception: pass
+    finally:
+        db_ctx.close()
 
-        db = SessionLocal()
-
-        # Fetch memory safely with raw SQL
-        memory_ctx = ""
-        try:
-            mem = db.execute(sql_text(
-                "SELECT memory_text FROM ai_memory WHERE user_id=:uid LIMIT 1"
-            ), {"uid": user_id}).fetchone()
-            if mem and mem[0]:
-                memory_ctx = "What I know about this user: " + mem[0][:300] + "\n"
-        except Exception: pass
-
-        # Recent sessions context
-        recent_ctx = ""
-        try:
-            r = db.execute(sql_text(
-                "SELECT emotion FROM motivation_sessions WHERE user_id=:uid ORDER BY created_at DESC LIMIT 3"
-            ), {"uid": user_id}).fetchall()
-            if r: recent_ctx = "Recent mood: " + ", ".join([x[0] for x in r if x[0]]) + "\n"
-        except Exception: pass
-
-        # AI reply
-        try:
-            resp = get_groq().chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role":"user","content":
-                    f"You are a caring daily check-in coach.\n{memory_ctx}{recent_ctx}"
-                    f"User mood: {mood}\nNote: {note or 'none'}\n\n"
-                    f"Give a SHORT (2-3 sentence) warm, personalized response. "
-                    f"Acknowledge their mood and suggest one tiny action."
-                }],
-                max_tokens=150
-            )
-            ai_reply = resp.choices[0].message.content.strip()
-        except Exception as e:
-            print(f"AI checkin error: {e}")
-            ai_reply = f"Thanks for checking in feeling {mood} today. Keep going — one small step forward is all you need."
-
-        # Save check-in
-        checkin = CheckIn(user_id=user_id, mood=mood, note=note, ai_reply=ai_reply)
-        db.add(checkin)
-        try:
-            db.flush()
-        except Exception as e:
-            print(f"CheckIn flush error: {e}")
-            try: db.rollback()
-            except: pass
-            return jsonify({"error": str(e)}), 500
-
-        today_str = now_ist().strftime("%Y-%m-%d")
-        try:
-            existing = db.execute(sql_text(
-                "SELECT id, memory_text FROM ai_memory WHERE user_id=:uid LIMIT 1"
-            ), {"uid": user_id}).fetchone()
-
-            if existing:
-                new_text = (existing[1] or "") + f" Check-in: {mood} on {today_str}."
-                db.execute(sql_text("""
-                    UPDATE ai_memory SET
-                        memory      = :mem,
-                        memory_text = :mt,
-                        last_emotion = :em,
-                        session_count = COALESCE(session_count,0)+1,
-                        updated_at  = :now
-                    WHERE user_id = :uid
-                """), {"mem": new_text[:500], "mt": new_text[:500],
-                       "em": mood, "now": datetime.utcnow(), "uid": user_id})
-            else:
-                init = f"User mood: {mood}. First check-in: {today_str}."
-                db.execute(sql_text("""
-                    INSERT INTO ai_memory
-                        (user_id, memory, memory_text, session_count, last_emotion, updated_at)
-                    VALUES (:uid,:mem,:mt,1,:em,:now)
-                """), {"uid": user_id, "mem": init, "mt": init,
-                       "em": mood, "now": datetime.utcnow()})
-        except Exception as me:
-            print(f"[checkin] Memory skip: {me}")
-            try: db.rollback()
-            except: pass
-
-        try:
-            db.commit()
-        except Exception as ce:
-            print(f"Commit err: {ce}")
-            try: db.rollback()
-            except: pass
-            db2 = SessionLocal()
-            try:
-                db2.add(CheckIn(user_id=user_id, mood=mood, note=note, ai_reply=ai_reply))
-                db2.commit()
-            except Exception as e2:
-                print(f"Retry commit fail: {e2}")
-                return jsonify({"error":"Check-in save failed"}), 500
-            finally:
-                db2.close()
-
-        db.close()
-        return jsonify({"ai_reply": ai_reply, "mood": mood, "success": True})
-
+    try:
+        resp = get_groq().chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content":
+                f"You are a caring daily check-in coach.\n{memory_ctx}{recent_ctx}"
+                f"User mood: {mood}\nNote: {note or 'none'}\n\n"
+                f"Give a SHORT (2-3 sentence) warm, personalized response. "
+                f"Acknowledge their mood and suggest one tiny action."
+            }],
+            max_tokens=150
+        )
+        ai_reply = resp.choices[0].message.content.strip()
     except Exception as e:
-        print("Checkin error:", e)
-        import traceback; traceback.print_exc()
-        if db:
-            try: db.rollback(); db.close()
-            except: pass
-        return jsonify({"error": str(e)}), 500
+        print(f"AI checkin error: {e}")
+        ai_reply = f"Thanks for checking in feeling {mood} today. Keep going — one small step forward is all you need."
+
+    # ── Step 2: Save check-in in its OWN session and commit immediately ──
+    # This is isolated so ai_memory errors CANNOT roll it back.
+    db_save = SessionLocal()
+    try:
+        checkin = CheckIn(user_id=user_id, mood=mood, note=note, ai_reply=ai_reply)
+        db_save.add(checkin)
+        db_save.commit()
+        print(f"[checkin] ✅ Saved check-in for user {user_id} mood={mood}")
+    except Exception as e:
+        print(f"[checkin] ❌ Save failed: {e}")
+        try: db_save.rollback()
+        except: pass
+        db_save.close()
+        return jsonify({"error": "Check-in save failed: " + str(e)}), 500
+    finally:
+        db_save.close()
+
+    # ── Step 3: Update ai_memory in a SEPARATE session (failure is OK) ──
+    today_str = now_ist().strftime("%Y-%m-%d")
+    db_mem = SessionLocal()
+    try:
+        existing = db_mem.execute(sql_text(
+            "SELECT id, memory_text FROM ai_memory WHERE user_id=:uid LIMIT 1"
+        ), {"uid": user_id}).fetchone()
+
+        if existing:
+            new_text = (existing[1] or "") + f" Check-in: {mood} on {today_str}."
+            db_mem.execute(sql_text("""
+                UPDATE ai_memory SET
+                    memory_text  = :mt,
+                    last_emotion = :em,
+                    session_count = COALESCE(session_count,0)+1,
+                    updated_at   = :now
+                WHERE user_id = :uid
+            """), {"mt": new_text[:500], "em": mood, "now": datetime.utcnow(), "uid": user_id})
+        else:
+            # Only insert columns we know exist — skip "memory" column
+            # which caused the original crash
+            try:
+                init = f"User mood: {mood}. First check-in: {today_str}."
+                db_mem.execute(sql_text("""
+                    INSERT INTO ai_memory (user_id, memory_text, session_count, last_emotion, updated_at)
+                    VALUES (:uid, :mt, 1, :em, :now)
+                """), {"uid": user_id, "mt": init, "em": mood, "now": datetime.utcnow()})
+            except Exception as ie:
+                print(f"[checkin] ai_memory insert skip: {ie}")
+        db_mem.commit()
+    except Exception as me:
+        print(f"[checkin] ai_memory update skip (non-fatal): {me}")
+        try: db_mem.rollback()
+        except: pass
+    finally:
+        db_mem.close()
+
+    return jsonify({"ai_reply": ai_reply, "mood": mood, "success": True})
 
 
 # ── GET /api/checkin/history/<user_id> ──────────────────────────────────
 @checkin_bp.route("/checkin/history/<int:user_id>", methods=["GET"])
 def get_checkins(user_id):
-    """
-    FIX: Detects actual table name (check_ins vs checkins) at runtime.
-    This is why history returned [] even though streak showed 2 days —
-    the streak query used motivation_sessions but history queried the wrong table.
-    """
     db = SessionLocal()
     try:
         tbl = _checkin_table(db)
         print(f"[checkin/history] Querying table: {tbl} for user {user_id}")
-
         rows = db.execute(sql_text(
             f"SELECT id, mood, note, ai_reply, created_at FROM {tbl} WHERE user_id=:uid ORDER BY created_at DESC"
         ), {"uid": user_id}).fetchall()
-
         print(f"[checkin/history] Found {len(rows)} rows")
-
-        result = []
-        for r in rows:
-            result.append({
-                "id":         r[0],
-                "mood":       r[1] or "okay",
-                "note":       r[2] or "",
-                "ai_reply":   r[3] or "",
-                "date":       ist_date(r[4]).isoformat() if r[4] else None,
-                "created_at": to_ist(r[4]).isoformat() if r[4] else None,
-            })
-        return jsonify(result)
-
+        return jsonify([{
+            "id":       r[0],
+            "mood":     r[1] or "okay",
+            "note":     r[2] or "",
+            "ai_reply": r[3] or "",
+            "date":     ist_date(r[4]).isoformat() if r[4] else None,
+            "created_at": to_ist(r[4]).isoformat() if r[4] else None,
+        } for r in rows])
     except Exception as e:
         print(f"[checkin/history] Error: {e}")
-        import traceback; traceback.print_exc()
         try: db.rollback()
         except: pass
         return jsonify([])
@@ -260,7 +217,7 @@ def get_checkins(user_id):
 @checkin_bp.route("/checkin/today/<int:user_id>", methods=["GET"])
 def checked_in_today(user_id):
     today = now_ist().date()
-    db    = SessionLocal()
+    db = SessionLocal()
     try:
         tbl = _checkin_table(db)
         rows = db.execute(sql_text(
@@ -280,12 +237,11 @@ def get_streak(user_id):
     db = SessionLocal()
     try:
         all_dates = _all_activity_dates(db, user_id)
-        streak    = _calc_streak(all_dates)
-        total_active_days = len(all_dates)
+        streak = _calc_streak(all_dates)
         return jsonify({
-            "streak":            streak,
-            "total_active_days": total_active_days,
-            "user_id":           user_id
+            "streak": streak,
+            "total_active_days": len(all_dates),
+            "user_id": user_id
         })
     except Exception as e:
         print("Streak error:", e)
@@ -318,24 +274,23 @@ def daily_nudge(user_id):
             except Exception: pass
 
         all_dates = _all_activity_dates(db, user_id)
-        streak    = _calc_streak(all_dates)
-
-        hour        = now_ist().hour
+        streak = _calc_streak(all_dates)
+        hour = now_ist().hour
         time_of_day = "morning" if hour < 12 else "afternoon" if hour < 17 else "evening"
 
         if not session_moods:
             return jsonify({
-                "nudge":"Welcome! Set your first goal and let's build your journey together.",
-                "mood_type":"neutral","streak":streak,"steps_done":0,
-                "goal_title":goal_title,"time_of_day":time_of_day
+                "nudge": "Welcome! Set your first goal and let's build your journey together.",
+                "mood_type": "neutral", "streak": streak, "steps_done": 0,
+                "goal_title": goal_title, "time_of_day": time_of_day
             })
 
-        recent7    = session_moods[:7]
-        pos_count  = sum(1 for r in recent7 if r[0]=="positive")
-        neg_count  = sum(1 for r in recent7 if r[0] in ("negative","stressed","anxious","sad"))
+        recent7   = session_moods[:7]
+        pos_count = sum(1 for r in recent7 if r[0] == "positive")
+        neg_count = sum(1 for r in recent7 if r[0] in ("negative", "stressed", "anxious", "sad"))
         total_mood = len(recent7)
-        pos_ratio  = pos_count/total_mood if total_mood else 0
-        neg_ratio  = neg_count/total_mood if total_mood else 0
+        pos_ratio  = pos_count / total_mood if total_mood else 0
+        neg_ratio  = neg_count / total_mood if total_mood else 0
 
         goal_part   = f"'{goal_title}'" if goal_title else "your goal"
         streak_part = f" {streak}-day streak!" if streak > 1 else ""
@@ -355,7 +310,7 @@ def daily_nudge(user_id):
             try:
                 ai_resp = get_groq().chat.completions.create(
                     model="llama-3.3-70b-versatile",
-                    messages=[{"role":"user","content":
+                    messages=[{"role": "user", "content":
                         f"One motivating nudge (2 sentences, under 50 words).\n"
                         f"Goal: {goal_title}\nStreak: {streak} days\nTime: {time_of_day}\n"
                         f"Mood: {pos_count} positive, {neg_count} tough of last {total_mood}."
@@ -368,12 +323,12 @@ def daily_nudge(user_id):
                 print("AI nudge error:", e)
 
         return jsonify({
-            "nudge":nudge,"mood_type":mood_type,"streak":streak,
-            "steps_done":steps_done,"goal_title":goal_title,
-            "time_of_day":time_of_day,"pos_sessions":pos_count,"neg_sessions":neg_count
+            "nudge": nudge, "mood_type": mood_type, "streak": streak,
+            "steps_done": steps_done, "goal_title": goal_title,
+            "time_of_day": time_of_day, "pos_sessions": pos_count, "neg_sessions": neg_count
         })
     except Exception as e:
         print("Daily nudge error:", e)
-        return jsonify({"nudge":"Good to see you. What are we working on today?","mood_type":"neutral","streak":0})
+        return jsonify({"nudge": "Good to see you. What are we working on today?", "mood_type": "neutral", "streak": 0})
     finally:
         db.close()

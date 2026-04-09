@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
+import emailjs from "@emailjs/browser";
 
 var API = "https://manifesting-motivation-backend.onrender.com/api";
 
@@ -195,43 +196,49 @@ function InvitePanel({ user }) {
     }).catch(function(){});
   }
 
-  // ── REAL email sending via backend ────────────────────────────────────────
-  async function sendInviteEmail(e) {
-    if (e) e.preventDefault();
+  // ── Email sending via EmailJS (no backend needed) ──────────────────────────
+  function sendInviteEmail(e) {
+    if (e && e.preventDefault) e.preventDefault();
     var trimmed = email.trim().toLowerCase();
-    if (!trimmed || !trimmed.includes("@") || !trimmed.includes(".")) {
+    if (!trimmed || !trimmed.includes("@")) {
       setResult({ success:false, message:"Please enter a valid email address." });
       return;
     }
     setSending(true);
     setResult(null);
-    try {
-      var res = await axios.post(API+"/invite/send", {
-        user_id: user?.id,
-        email:   trimmed,
+
+    var serviceId  = process.env.REACT_APP_EMAILJS_SERVICE_ID;
+    var templateId = process.env.REACT_APP_EMAILJS_TEMPLATE_ID;
+    var publicKey  = process.env.REACT_APP_EMAILJS_PUBLIC_KEY;
+
+    emailjs.send(
+      serviceId,
+      templateId,
+      {
+        sender_name: user && user.name ? user.name : "A friend",
+        invite_url:  inviteLink,
+        to_email:    trimmed,
+      },
+      publicKey
+    )
+    .then(function() {
+      setResult({
+        success: true,
+        message: "Invite sent to " + trimmed + "! You will earn +50 XP when they join.",
+        email_sent: true,
       });
-      var data = res.data;
-      if (data.success) {
-        setResult({
-          success: true,
-          message: data.email_sent
-            ? "Invite sent to " + trimmed + "! 🎉 You'll earn +50 XP when they join."
-            : "Invite saved! Email couldn't be sent — share this link manually:",
-          link: data.invite_url || inviteLink,
-          email_sent: data.email_sent,
-        });
-        setEmail("");
-        // Refresh stats
-        axios.get(API+"/invite/stats/"+user.id).then(function(r){ setIStats(r.data||{}); }).catch(function(){});
-      } else {
-        setResult({ success:false, message: data.error || "Something went wrong. Try again." });
-      }
-    } catch(err) {
-      var msg = err?.response?.data?.error || "Could not reach server. Is Flask running?";
-      setResult({ success:false, message: msg });
-    } finally {
-      setSending(false);
-    }
+      setEmail("");
+      // Refresh invite stats
+      axios.get(API+"/invite/stats/"+user.id).then(function(r){ setIStats(r.data||{}); }).catch(function(){});
+    })
+    .catch(function(err) {
+      console.error("[EmailJS] Error:", err);
+      setResult({
+        success: false,
+        message: "Failed to send: " + (err && err.text ? err.text : "Check EmailJS dashboard"),
+      });
+    })
+    .finally(function(){ setSending(false); });
   }
 
   return (

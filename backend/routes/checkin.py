@@ -30,15 +30,37 @@ def ist_date(dt):
     return to_ist(dt).date()
 
 
+# ── Helper: detect which table name exists ──────────────────────────────
+def _checkin_table(db):
+    """
+    Returns the actual check-ins table name in your DB.
+    Tries 'check_ins' first, then 'checkins'.
+    """
+    for tbl in ["check_ins", "checkins"]:
+        try:
+            result = db.execute(sql_text(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_name=:t LIMIT 1"
+            ), {"t": tbl}).fetchone()
+            if result:
+                print(f"[checkin] Using table: {tbl}")
+                return tbl
+        except Exception:
+            pass
+    # fallback
+    return "check_ins"
+
+
 # ── Helper: collect all unique activity dates for a user ────────────────
 def _all_activity_dates(db, user_id):
-    """
-    Returns sorted list of unique UTC dates where the user did ANYTHING.
-    Uses DATE() in PostgreSQL which returns UTC date — matches My Story exactly.
-    """
     from datetime import date as _date, datetime as _dt
     dates = set()
-    for tbl in ["motivation_sessions", "check_ins", "journal_entries"]:
+
+    # Use detected table name for check-ins
+    checkin_tbl = _checkin_table(db)
+    activity_tables = ["motivation_sessions", checkin_tbl, "journal_entries"]
+
+    for tbl in activity_tables:
         try:
             rows = db.execute(sql_text(
                 f"SELECT DISTINCT DATE(created_at) FROM {tbl} WHERE user_id=:uid AND created_at IS NOT NULL"
@@ -57,7 +79,6 @@ def _all_activity_dates(db, user_id):
 
 
 def _calc_streak(sorted_dates_desc):
-    """Calculate streak from sorted dates (descending). Counts consecutive days ending today or yesterday."""
     if not sorted_dates_desc: return 0
     today = now_ist().date()
     streak = 0
@@ -67,7 +88,6 @@ def _calc_streak(sorted_dates_desc):
             streak += 1
             check_day = check_day - timedelta(days=1)
         elif d == check_day - timedelta(days=1):
-            # Allow today not checked in yet but yesterday was
             streak += 1
             check_day = d - timedelta(days=1)
         elif d < check_day - timedelta(days=1):
@@ -136,8 +156,6 @@ def do_checkin():
             except: pass
             return jsonify({"error": str(e)}), 500
 
-        # ✅ Update ai_memory using raw SQL with ON CONFLICT on id (not user_id)
-        # Falls back to simple UPDATE if ON CONFLICT fails
         today_str = now_ist().strftime("%Y-%m-%d")
         try:
             existing = db.execute(sql_text(
@@ -169,14 +187,12 @@ def do_checkin():
             try: db.rollback()
             except: pass
 
-        # Commit check-in
         try:
             db.commit()
         except Exception as ce:
             print(f"Commit err: {ce}")
             try: db.rollback()
             except: pass
-            # Retry with fresh session
             db2 = SessionLocal()
             try:
                 db2.add(CheckIn(user_id=user_id, mood=mood, note=note, ai_reply=ai_reply))
@@ -188,12 +204,6 @@ def do_checkin():
                 db2.close()
 
         db.close()
-        # ── Update streak after check-in ───────────────────────────────
-        try:
-            from streak_utils import update_user_streak
-            update_user_streak(db, user_id)
-        except Exception as se:
-            print(f"[checkin] streak update: {se}")
         return jsonify({"ai_reply": ai_reply, "mood": mood, "success": True})
 
     except Exception as e:
@@ -208,21 +218,37 @@ def do_checkin():
 # ── GET /api/checkin/history/<user_id> ──────────────────────────────────
 @checkin_bp.route("/checkin/history/<int:user_id>", methods=["GET"])
 def get_checkins(user_id):
-    """All check-ins, IST dates, real mood."""
+    """
+    FIX: Detects actual table name (check_ins vs checkins) at runtime.
+    This is why history returned [] even though streak showed 2 days —
+    the streak query used motivation_sessions but history queried the wrong table.
+    """
     db = SessionLocal()
     try:
+        tbl = _checkin_table(db)
+        print(f"[checkin/history] Querying table: {tbl} for user {user_id}")
+
         rows = db.execute(sql_text(
-            "SELECT id,mood,note,ai_reply,created_at FROM check_ins WHERE user_id=:uid ORDER BY created_at DESC"
+            f"SELECT id, mood, note, ai_reply, created_at FROM {tbl} WHERE user_id=:uid ORDER BY created_at DESC"
         ), {"uid": user_id}).fetchall()
-        return jsonify([{
-            "id":         r[0],
-            "mood":       r[1] or "okay",
-            "note":       r[2] or "",
-            "ai_reply":   r[3] or "",
-            "date":       ist_date(r[4]).isoformat() if r[4] else None,
-            "created_at": to_ist(r[4]).isoformat() if r[4] else None,
-        } for r in rows])
+
+        print(f"[checkin/history] Found {len(rows)} rows")
+
+        result = []
+        for r in rows:
+            result.append({
+                "id":         r[0],
+                "mood":       r[1] or "okay",
+                "note":       r[2] or "",
+                "ai_reply":   r[3] or "",
+                "date":       ist_date(r[4]).isoformat() if r[4] else None,
+                "created_at": to_ist(r[4]).isoformat() if r[4] else None,
+            })
+        return jsonify(result)
+
     except Exception as e:
+        print(f"[checkin/history] Error: {e}")
+        import traceback; traceback.print_exc()
         try: db.rollback()
         except: pass
         return jsonify([])
@@ -236,8 +262,9 @@ def checked_in_today(user_id):
     today = now_ist().date()
     db    = SessionLocal()
     try:
+        tbl = _checkin_table(db)
         rows = db.execute(sql_text(
-            "SELECT created_at FROM check_ins WHERE user_id=:uid ORDER BY created_at DESC LIMIT 5"
+            f"SELECT created_at FROM {tbl} WHERE user_id=:uid ORDER BY created_at DESC LIMIT 5"
         ), {"uid": user_id}).fetchall()
         done = any(ist_date(r[0]) == today for r in rows if r[0])
         return jsonify({"checked_in": done})
@@ -250,15 +277,11 @@ def checked_in_today(user_id):
 # ── GET /api/checkin/streak/<user_id> ───────────────────────────────────
 @checkin_bp.route("/checkin/streak/<int:user_id>", methods=["GET"])
 def get_streak(user_id):
-    """
-    ✅ FIXED: counts streak from ALL activity — sessions + journals + check_ins.
-    This matches the 44-day active days shown in My Story.
-    """
     db = SessionLocal()
     try:
         all_dates = _all_activity_dates(db, user_id)
         streak    = _calc_streak(all_dates)
-        total_active_days = len(all_dates)  # unique days with any activity
+        total_active_days = len(all_dates)
         return jsonify({
             "streak":            streak,
             "total_active_days": total_active_days,
@@ -294,7 +317,6 @@ def daily_nudge(user_id):
                 ), {"gid": goal_id}).fetchone()[0] or 0
             except Exception: pass
 
-        # Streak from all activity
         all_dates = _all_activity_dates(db, user_id)
         streak    = _calc_streak(all_dates)
 

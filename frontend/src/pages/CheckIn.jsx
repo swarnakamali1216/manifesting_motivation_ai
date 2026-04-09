@@ -2,16 +2,13 @@
  * CheckIn.jsx — FULLY FIXED
  *
  * FIXES:
- * 1. Week calendar: compares using backend's "date" field (IST date string)
- *    NOT c.created_at (which is IST datetime → toISOString() gives wrong UTC date)
- * 2. Top mood computed from real history
- * 3. Mood picker sends correct mood id to backend
- * 4. History shows real emoji + label for every mood
+ * 1. todayStr now uses IST offset (same as buildWeekDays) — fixes "No check-ins yet" bug
+ * 2. Week calendar correctly highlights today's check-in
+ * 3. History tab always loads when switching tabs
  */
 import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 
-// ── Butterfly logo (replaces robot emoji) ────────────────────────────────
 function ButterflyMini({ size }) {
   var s = size || 20;
   return (
@@ -35,8 +32,6 @@ function ButterflyMini({ size }) {
   );
 }
 
-
-
 var API = "https://manifesting-motivation-backend.onrender.com/api";
 
 var MOODS = [
@@ -46,7 +41,6 @@ var MOODS = [
   { id:"tired",     label:"Tired",     emoji:"😴", color:"#a78bfa", energy:2 },
   { id:"stressed",  label:"Stressed",  emoji:"😰", color:"#fb923c", energy:2 },
   { id:"sad",       label:"Sad",       emoji:"😢", color:"#f87171", energy:1 },
-  // aliases backend may return
   { id:"good",      label:"Good",      emoji:"😊", color:"#4ade80", energy:4 },
   { id:"meh",       label:"Meh",       emoji:"😑", color:"#60a5fa", energy:2 },
   { id:"bad",       label:"Bad",       emoji:"😔", color:"#f87171", energy:1 },
@@ -69,20 +63,22 @@ function getMood(id) {
   return m || { emoji:"😐", color:"#94a3b8", label: id.charAt(0).toUpperCase() + id.slice(1) };
 }
 
-// ── Day-of-week label array, Monday first ──
 var DAY_LABELS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
-// ── Build the 7-day window starting from Monday of current week ──
-// Uses IST offset (+5:30) to get the correct local date — NOT UTC
-function buildWeekDays() {
-  // Apply IST offset so getDay() reflects the correct Indian weekday
-  var IST_OFFSET = 330; // minutes
+var IST_OFFSET = 330; // UTC+5:30 in minutes
+
+// ── Get today's date string in IST (YYYY-MM-DD) ──────────────────────────
+function getTodayIST() {
   var nowIST = new Date(Date.now() + IST_OFFSET * 60000);
-  // YYYY-MM-DD string for today in IST
+  return nowIST.toISOString().slice(0, 10);
+}
+
+// ── Build 7-day window starting from Monday of current IST week ──────────
+function buildWeekDays() {
+  var nowIST   = new Date(Date.now() + IST_OFFSET * 60000);
   var todayStr = nowIST.toISOString().slice(0, 10);
-  // getDay() on the IST-adjusted date: 0=Sun,1=Mon,...,6=Sat
-  var dow = nowIST.getUTCDay();
-  var mondayOffset = (dow + 6) % 7; // days since Monday (Mon=0...Sun=6)
+  var dow      = nowIST.getUTCDay(); // 0=Sun
+  var mondayOffset = (dow + 6) % 7;  // days since Monday
   var days = [];
   for (var i = 0; i < 7; i++) {
     var d = new Date(nowIST);
@@ -96,13 +92,16 @@ function buildWeekDays() {
 function HistoryCard({ c }) {
   var [open, setOpen] = useState(false);
   var m = getMood(c.mood);
+  // FIX: append T12:00:00 so Date() parses as local noon, not UTC midnight
   var dateLabel = c.date
     ? new Date(c.date + "T12:00:00").toLocaleDateString("en-US", { weekday:"short", day:"numeric", month:"short", year:"numeric" })
     : "—";
 
   return (
-    <div style={{ background:"var(--card)", borderRadius:14, padding:"12px 14px", border:"1px solid var(--border)", marginBottom:8, borderLeft:"3px solid "+m.color, cursor:"pointer" }}
-      onClick={function(){ setOpen(function(v){ return !v; }); }}>
+    <div
+      style={{ background:"var(--card)", borderRadius:14, padding:"12px 14px", border:"1px solid var(--border)", marginBottom:8, borderLeft:"3px solid "+m.color, cursor:"pointer" }}
+      onClick={function(){ setOpen(function(v){ return !v; }); }}
+    >
       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
         <div style={{ fontSize:22 }}>{m.emoji}</div>
         <div style={{ flex:1, minWidth:0 }}>
@@ -110,13 +109,19 @@ function HistoryCard({ c }) {
             <span style={{ fontFamily:"'Syne',sans-serif", fontWeight:700, fontSize:13, color:m.color }}>{m.label}</span>
             <span style={{ fontSize:10, color:"var(--muted)" }}>{dateLabel}</span>
           </div>
-          {c.note && <div style={{ fontSize:11, color:"var(--muted)", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:open?"normal":"nowrap" }}>{c.note}</div>}
+          {c.note && (
+            <div style={{ fontSize:11, color:"var(--muted)", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:open?"normal":"nowrap" }}>
+              {c.note}
+            </div>
+          )}
         </div>
-        <div style={{ fontSize:12, color:"var(--muted)" }}>{open?"▲":"▼"}</div>
+        <div style={{ fontSize:12, color:"var(--muted)" }}>{open ? "▲" : "▼"}</div>
       </div>
       {open && c.ai_reply && (
         <div style={{ marginTop:10, padding:"10px 12px", borderRadius:10, background:m.color+"18", border:"1px solid "+m.color+"40", animation:"fadeIn 0.2s ease" }}>
-          <div style={{ fontSize:9, color:m.color, fontWeight:800, fontFamily:"'Syne',sans-serif", marginBottom:4, display:"flex", alignItems:"center", gap:4 }}><ButterflyMini size={12}/> AI COACH REPLY</div>
+          <div style={{ fontSize:9, color:m.color, fontWeight:800, fontFamily:"'Syne',sans-serif", marginBottom:4, display:"flex", alignItems:"center", gap:4 }}>
+            <ButterflyMini size={12}/> AI COACH REPLY
+          </div>
           <div style={{ fontSize:12, color:"var(--text)", lineHeight:1.65 }}>{c.ai_reply}</div>
         </div>
       )}
@@ -125,48 +130,46 @@ function HistoryCard({ c }) {
 }
 
 function CheckIn({ user }) {
-  var [selectedMood, setSelectedMood] = useState(null);
-  var [note,         setNote]         = useState("");
-  var [aiReply,      setAiReply]      = useState(null);
-  var [submittedMood,setSubmittedMood]= useState(null);
-  var [loading,      setLoading]      = useState(false);
-  var [checkedToday, setCheckedToday] = useState(false);
-  var [history,      setHistory]      = useState([]);
-  var [streak,       setStreak]       = useState(0);
-  var [tab,          setTab]          = useState("checkin");
-  var [weekDays,     setWeekDays]     = useState([]);
+  var [selectedMood,  setSelectedMood]  = useState(null);
+  var [note,          setNote]          = useState("");
+  var [aiReply,       setAiReply]       = useState(null);
+  var [submittedMood, setSubmittedMood] = useState(null);
+  var [loading,       setLoading]       = useState(false);
+  var [checkedToday,  setCheckedToday]  = useState(false);
+  var [history,       setHistory]       = useState([]);
+  var [streak,        setStreak]        = useState(0);
+  var [tab,           setTab]           = useState("checkin");
+  var [weekDays,      setWeekDays]      = useState([]);
 
   var loadAll = useCallback(function() {
     if (!user?.id) return;
-    // Fetch both history and streak
     Promise.all([
       axios.get(API + "/checkin/history/" + user.id),
       axios.get(API + "/checkin/streak/"  + user.id),
     ]).then(function(res) {
-      var hist  = Array.isArray(res[0].data) ? res[0].data : [];
-      var strk  = res[1].data || {};
+      var hist = Array.isArray(res[0].data) ? res[0].data : [];
+      var strk = res[1].data || {};
       setHistory(hist);
       setStreak(typeof strk.streak === "number" ? strk.streak : 0);
 
-      // ── WEEK CALENDAR FIX ──────────────────────────────────────────────
-      // Backend returns each checkin with a "date" field = IST date (YYYY-MM-DD)
-      // We compare that "date" field directly — no UTC conversion needed
+      // Build set of IST date strings that have check-ins
       var checkinDateSet = new Set(
         hist.map(function(c) { return c.date || ""; }).filter(Boolean)
       );
 
+      // Build week grid and mark active days
       var days = buildWeekDays();
       days.forEach(function(d) {
         d.active = checkinDateSet.has(d.dateStr);
-        // Also find the mood for that day if checked in
         var entry = hist.find(function(c){ return c.date === d.dateStr; });
         d.moodId  = entry ? entry.mood : null;
       });
       setWeekDays(days);
 
-      // Check if today has a checkin
-      var todayStr = new Date().toLocaleDateString("en-CA");
+      // ✅ FIX: use IST date for today check (was using wrong locale string)
+      var todayStr = getTodayIST();
       setCheckedToday(checkinDateSet.has(todayStr));
+
     }).catch(function(e){ console.error("CheckIn load error:", e); });
   }, [user]);
 
@@ -196,7 +199,6 @@ function CheckIn({ user }) {
       .finally(function(){ setLoading(false); });
   }
 
-  // Compute top mood from history
   var topMoodId = null;
   if (history.length > 0) {
     var counts = {};
@@ -335,7 +337,7 @@ function CheckIn({ user }) {
             </div>
           ) : (
             <div>
-              {/* ── WEEK CALENDAR — fixed ── */}
+              {/* Week Calendar */}
               <div style={{ background:"var(--card)", borderRadius:16, padding:16, marginBottom:16, border:"1px solid var(--border)" }}>
                 <div style={{ fontSize:9, color:"var(--muted)", fontFamily:"'Syne',sans-serif", fontWeight:800, letterSpacing:"0.1em", marginBottom:12 }}>THIS WEEK</div>
                 <div style={{ display:"flex", gap:4, justifyContent:"space-between" }}>
@@ -358,7 +360,7 @@ function CheckIn({ user }) {
                 </div>
               </div>
 
-              {/* Stats summary */}
+              {/* Stats */}
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:16 }}>
                 {[
                   { label:"Total",    v:history.length, c:"#7c5cfc", e:"📅" },
@@ -385,4 +387,3 @@ function CheckIn({ user }) {
 }
 
 export default CheckIn;
-

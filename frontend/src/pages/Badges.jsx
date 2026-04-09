@@ -281,9 +281,7 @@ function InvitePanel({ user }) {
       {/* Email invite — REAL sending */}
       <div>
         <div style={{fontSize:"10px",fontWeight:"800",color:"var(--muted)",letterSpacing:"0.12em",marginBottom:"8px",fontFamily:"'Syne',sans-serif"}}>INVITE BY EMAIL</div>
-        <div style={{fontSize:"11px",color:"var(--muted)",marginBottom:"8px",lineHeight:"1.5"}}>
-          Your app sends the email from the Manifesting Motivation account, but says it's from you.
-        </div>
+
         <form onSubmit={sendInviteEmail} style={{display:"flex",gap:"8px"}}>
           <input
             type="email"

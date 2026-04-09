@@ -1,4 +1,6 @@
-import React, { useState } from "react";
+import os
+
+content = """import React, { useState } from "react";
 import emailjs from "@emailjs/browser";
 
 var EMAILJS_SERVICE_ID  = process.env.REACT_APP_EMAILJS_SERVICE_ID;
@@ -152,3 +154,11 @@ function InviteTab({ user }) {
 }
 
 export default InviteTab;
+"""
+
+path = os.path.join("frontend", "src", "components", "InviteTab.jsx")
+with open(path, "w", encoding="utf-8") as f:
+    f.write(content)
+
+print("Done! Written to:", path)
+print("File size:", os.path.getsize(path), "bytes")

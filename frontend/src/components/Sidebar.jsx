@@ -72,7 +72,6 @@ function NavBtn({ label, icon, active, onClick }) {
   );
 }
 
-
 // ── Notification Bell ─────────────────────────────────────────────────────
 export function NotificationBell({ userId, onNavigate }) {
   var [notes, setNotes] = React.useState([]);
@@ -80,17 +79,15 @@ export function NotificationBell({ userId, onNavigate }) {
 
   React.useEffect(function() {
     if (!userId) return;
-    // Build notifications from localStorage-cached stats
     try {
       var stats = JSON.parse(localStorage.getItem("mm_stats_" + userId) || "{}");
       var built = [];
-      if (stats.streak >= 7)  built.push({ id:"s7",  icon:"🔥", msg:"7-day streak! You're on fire.",      page:"badges"  });
-      if (stats.streak >= 3)  built.push({ id:"s3",  icon:"🔥", msg:"3-day streak — keep it going!",       page:"checkin" });
-      if (stats.xp   >= 100)  built.push({ id:"x1",  icon:"⚡", msg:"100 XP earned — check your badges!",  page:"badges"  });
-      if (stats.xp   >= 500)  built.push({ id:"x5",  icon:"⚡", msg:"500 XP! You've reached Explorer.",    page:"badges"  });
-      if (stats.journals >= 1) built.push({ id:"j1", icon:"📔", msg:"Journal entry saved. +15 XP earned!", page:"journal" });
-      if (stats.goals_done >= 1) built.push({ id:"g1",icon:"✅","msg":"Goal completed! Amazing work.",      page:"goals"   });
-      // Only show unread (not dismissed)
+      if (stats.streak >= 7)     built.push({ id:"s7",  icon:"🔥", msg:"7-day streak! You're on fire.",      page:"badges"  });
+      if (stats.streak >= 3)     built.push({ id:"s3",  icon:"🔥", msg:"3-day streak — keep it going!",       page:"checkin" });
+      if (stats.xp   >= 100)     built.push({ id:"x1",  icon:"⚡", msg:"100 XP earned — check your badges!",  page:"badges"  });
+      if (stats.xp   >= 500)     built.push({ id:"x5",  icon:"⚡", msg:"500 XP! You've reached Explorer.",    page:"badges"  });
+      if (stats.journals >= 1)   built.push({ id:"j1",  icon:"📔", msg:"Journal entry saved. +15 XP earned!", page:"journal" });
+      if (stats.goals_done >= 1) built.push({ id:"g1",  icon:"✅", msg:"Goal completed! Amazing work.",       page:"goals"   });
       var dismissed = JSON.parse(localStorage.getItem("mm_dismissed_" + userId) || "[]");
       setNotes(built.filter(function(n){ return !dismissed.includes(n.id); }).slice(0,5));
     } catch(e) {}
@@ -198,7 +195,9 @@ export function NotificationBell({ userId, onNavigate }) {
   );
 }
 
-// ── Hamburger/Close icon — rendered OUTSIDE the sidebar in App.jsx ────────
+// ── HamburgerButton — the ONLY toggle button, shown on mobile ────────────
+// FIX: removed the duplicate X button that was inside the sidebar header.
+// The hamburger itself switches between ☰ and ✕ icons — no second button needed.
 export function HamburgerButton({ isOpen, onClick }) {
   return (
     <button onClick={onClick}
@@ -217,12 +216,10 @@ export function HamburgerButton({ isOpen, onClick }) {
         transition:"background 0.15s",
       }}>
       {isOpen ? (
-        // X icon when open
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
       ) : (
-        // Hamburger ☰ when closed
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
           <line x1="3" y1="6"  x2="21" y2="6"/>
           <line x1="3" y1="12" x2="21" y2="12"/>
@@ -233,12 +230,14 @@ export function HamburgerButton({ isOpen, onClick }) {
   );
 }
 
-// ── Main Sidebar — NO close button inside, NO X inside ───────────────────
+// ── Main Sidebar ──────────────────────────────────────────────────────────
+// FIX: Removed the duplicate X close button from inside the sidebar header.
+// On mobile: only HamburgerButton (above) + overlay tap closes the sidebar.
+// On desktop: sidebar is always visible, no close button needed.
 function Sidebar({ isOpen, onClose, onNavigate, user, activePage, onLogout }) {
 
   function nav(id) {
     if (onNavigate) onNavigate(id);
-    // On mobile, close after navigation
     if (window.innerWidth <= 768 && onClose) onClose();
   }
 
@@ -265,66 +264,44 @@ function Sidebar({ isOpen, onClose, onNavigate, user, activePage, onLogout }) {
           will-change:transform;
         }
         @media(min-width:769px){
-          /* Desktop: always visible, no translate */
           .sbwrap { transform:translateX(0) !important; }
           .sb-overlay { display:none !important; }
-          .sb-close-btn { display:none !important; }
           .hamburger-btn { display:none !important; }
         }
         @media(max-width:768px){
-          /* Mobile: hamburger always visible */
           .hamburger-btn { display:flex !important; }
-        }
-        @media(max-width:768px){
-          /* Mobile: hidden by default */
           .sbwrap { transform:translateX(-100%); }
           .sbwrap.open { transform:translateX(0); box-shadow:6px 0 24px rgba(0,0,0,.14); }
         }
       `}</style>
 
-      {/* ── THE SIDEBAR PANEL — zero X button inside ── */}
       <div className={"sbwrap" + (isOpen ? " open" : "")}>
 
-        {/* LOGO + CLOSE BUTTON row */}
-        <div style={{padding:"14px 14px 12px",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div style={{cursor:"pointer",display:"flex",alignItems:"center",gap:9}}
+        {/* LOGO ONLY — no close button inside sidebar */}
+        <div style={{ padding:"14px 14px 12px", flexShrink:0 }}>
+          <div style={{ cursor:"pointer", display:"flex", alignItems:"center", gap:9 }}
             onClick={function(){ nav("home"); }}>
             <ButterflyLogo size={30}/>
             <div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,lineHeight:1.15}}>
-                <div style={{fontSize:14,background:"linear-gradient(135deg,#7c5cfc,#9b6ffc)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Manifesting</div>
-                <div style={{fontSize:14,background:"linear-gradient(135deg,#9b6ffc,#fc5cf0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Motivation</div>
+              <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:900, lineHeight:1.15 }}>
+                <div style={{ fontSize:14, background:"linear-gradient(135deg,#7c5cfc,#9b6ffc)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>Manifesting</div>
+                <div style={{ fontSize:14, background:"linear-gradient(135deg,#9b6ffc,#fc5cf0)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>Motivation</div>
               </div>
-              <div style={{fontSize:9,color:"var(--muted,#9b9bad)",marginTop:1,fontWeight:500,letterSpacing:".03em"}}>AI Coaching Platform</div>
+              <div style={{ fontSize:9, color:"var(--muted,#9b9bad)", marginTop:1, fontWeight:500, letterSpacing:".03em" }}>AI Coaching Platform</div>
             </div>
           </div>
-          {/* ── Close button — visible on mobile, hidden on desktop ── */}
-          <button onClick={onClose}
-            className="sb-close-btn"
-            aria-label="Close menu"
-            style={{
-              width:32,height:32,borderRadius:8,border:"1px solid var(--border,#e5e3f0)",
-              background:"var(--bg,#f8f7ff)",cursor:"pointer",
-              display:"flex",alignItems:"center",justifyContent:"center",
-              color:"var(--text,#1a1a2e)",flexShrink:0,
-              WebkitTapHighlightColor:"transparent",
-            }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
         </div>
 
         {/* USER CARD */}
         {user && (
-          <div style={{padding:"0 12px 12px",flexShrink:0}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,padding:"9px 11px",borderRadius:10,background:"rgba(124,92,252,0.05)",border:"1px solid rgba(124,92,252,0.1)"}}>
-              <div style={{width:32,height:32,borderRadius:"50%",background:"linear-gradient(135deg,#7c5cfc,#fc5cf0)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:"white",fontWeight:700,flexShrink:0}}>
+          <div style={{ padding:"0 12px 12px", flexShrink:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 11px", borderRadius:10, background:"rgba(124,92,252,0.05)", border:"1px solid rgba(124,92,252,0.1)" }}>
+              <div style={{ width:32, height:32, borderRadius:"50%", background:"linear-gradient(135deg,#7c5cfc,#fc5cf0)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, color:"white", fontWeight:700, flexShrink:0 }}>
                 {(user.name||"U").charAt(0).toUpperCase()}
               </div>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontWeight:600,fontSize:13,color:"var(--text,#1a1a2e)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user.name||"User"}</div>
-                <div style={{fontSize:10,color:"var(--muted,#9b9bad)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontWeight:600, fontSize:13, color:"var(--text,#1a1a2e)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.name||"User"}</div>
+                <div style={{ fontSize:10, color:"var(--muted,#9b9bad)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                   {isAdmin ? "⚡ Admin" : (user.email||"")}
                 </div>
               </div>
@@ -333,7 +310,7 @@ function Sidebar({ isOpen, onClose, onNavigate, user, activePage, onLogout }) {
         )}
 
         {/* MAIN NAV */}
-        <nav style={{padding:"4px 10px",flex:1}}>
+        <nav style={{ padding:"4px 10px", flex:1 }}>
           {MENU.map(function(item){
             return <NavBtn key={item.id} label={item.label} icon={item.icon}
               active={isActive(item.id)} onClick={function(){ nav(item.id); }}/>;
@@ -341,7 +318,7 @@ function Sidebar({ isOpen, onClose, onNavigate, user, activePage, onLogout }) {
         </nav>
 
         {/* BOTTOM */}
-        <div style={{padding:"4px 10px 14px",flexShrink:0}}>
+        <div style={{ padding:"4px 10px 14px", flexShrink:0 }}>
           <NavBtn label="Settings" icon="settings"
             active={activePage==="settings"}
             onClick={function(){ nav("settings"); }}/>
@@ -352,32 +329,31 @@ function Sidebar({ isOpen, onClose, onNavigate, user, activePage, onLogout }) {
           )}
           {onLogout && (
             <button onClick={onLogout} style={{
-              width:"100%",padding:"9px 13px",margin:"3px 0 0",borderRadius:8,border:"none",
-              background:"transparent",color:"#f87171",fontSize:13,
-              fontFamily:"'DM Sans',sans-serif",fontWeight:500,cursor:"pointer",
-              display:"flex",alignItems:"center",gap:10,transition:"all .15s",
+              width:"100%", padding:"9px 13px", margin:"3px 0 0", borderRadius:8, border:"none",
+              background:"transparent", color:"#f87171", fontSize:13,
+              fontFamily:"'DM Sans',sans-serif", fontWeight:500, cursor:"pointer",
+              display:"flex", alignItems:"center", gap:10, transition:"all .15s",
               WebkitTapHighlightColor:"transparent",
             }}
-            onMouseEnter={function(e){e.currentTarget.style.background="rgba(248,113,113,0.08)";}}
-            onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}>
-              <span style={{opacity:.8,display:"flex"}}>{ICONS.logout}</span>
+            onMouseEnter={function(e){ e.currentTarget.style.background="rgba(248,113,113,0.08)"; }}
+            onMouseLeave={function(e){ e.currentTarget.style.background="transparent"; }}>
+              <span style={{ opacity:.8, display:"flex" }}>{ICONS.logout}</span>
               <span>Log out</span>
             </button>
           )}
-          <div style={{padding:"10px 4px 0",fontSize:10,color:"var(--muted)",textAlign:"center",lineHeight:1.6}}>
+          <div style={{ padding:"10px 4px 0", fontSize:10, color:"var(--muted)", textAlign:"center", lineHeight:1.6 }}>
             v1.0.0 · AI-powered goals &amp; journaling
           </div>
         </div>
       </div>
 
-      {/* OVERLAY — tap anywhere outside to close on mobile */}
+      {/* OVERLAY — tap outside to close on mobile */}
       {isOpen && (
         <div className="sb-overlay" onClick={onClose}
-          style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:299,WebkitTapHighlightColor:"transparent"}}/>
+          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:299, WebkitTapHighlightColor:"transparent" }}/>
       )}
     </>
   );
 }
 
 export default Sidebar;
-

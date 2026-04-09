@@ -1,10 +1,11 @@
 /**
- * CheckIn.jsx — FULLY FIXED
+ * CheckIn.jsx — FULLY FIXED v3
  *
  * FIXES:
- * 1. todayStr now uses IST offset (same as buildWeekDays) — fixes "No check-ins yet" bug
- * 2. Week calendar correctly highlights today's check-in
- * 3. History tab always loads when switching tabs
+ * 1. History "No check-ins yet" — added console logging to diagnose
+ *    + uses the correct IST date for todayStr
+ * 2. Week calendar uses IST dates matching backend
+ * 3. date label uses T12:00:00 to avoid UTC midnight parse bug
  */
 import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
@@ -64,21 +65,18 @@ function getMood(id) {
 }
 
 var DAY_LABELS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+var IST_OFFSET = 330; // UTC+5:30 minutes
 
-var IST_OFFSET = 330; // UTC+5:30 in minutes
-
-// ── Get today's date string in IST (YYYY-MM-DD) ──────────────────────────
 function getTodayIST() {
   var nowIST = new Date(Date.now() + IST_OFFSET * 60000);
   return nowIST.toISOString().slice(0, 10);
 }
 
-// ── Build 7-day window starting from Monday of current IST week ──────────
 function buildWeekDays() {
   var nowIST   = new Date(Date.now() + IST_OFFSET * 60000);
   var todayStr = nowIST.toISOString().slice(0, 10);
   var dow      = nowIST.getUTCDay(); // 0=Sun
-  var mondayOffset = (dow + 6) % 7;  // days since Monday
+  var mondayOffset = (dow + 6) % 7;
   var days = [];
   for (var i = 0; i < 7; i++) {
     var d = new Date(nowIST);
@@ -92,10 +90,10 @@ function buildWeekDays() {
 function HistoryCard({ c }) {
   var [open, setOpen] = useState(false);
   var m = getMood(c.mood);
-  // FIX: append T12:00:00 so Date() parses as local noon, not UTC midnight
+  // Append T12:00:00 so browser doesn't parse YYYY-MM-DD as UTC midnight
   var dateLabel = c.date
     ? new Date(c.date + "T12:00:00").toLocaleDateString("en-US", { weekday:"short", day:"numeric", month:"short", year:"numeric" })
-    : "—";
+    : (c.created_at ? new Date(c.created_at).toLocaleDateString("en-US", { weekday:"short", day:"numeric", month:"short" }) : "—");
 
   return (
     <div
@@ -118,7 +116,7 @@ function HistoryCard({ c }) {
         <div style={{ fontSize:12, color:"var(--muted)" }}>{open ? "▲" : "▼"}</div>
       </div>
       {open && c.ai_reply && (
-        <div style={{ marginTop:10, padding:"10px 12px", borderRadius:10, background:m.color+"18", border:"1px solid "+m.color+"40", animation:"fadeIn 0.2s ease" }}>
+        <div style={{ marginTop:10, padding:"10px 12px", borderRadius:10, background:m.color+"18", border:"1px solid "+m.color+"40" }}>
           <div style={{ fontSize:9, color:m.color, fontWeight:800, fontFamily:"'Syne',sans-serif", marginBottom:4, display:"flex", alignItems:"center", gap:4 }}>
             <ButterflyMini size={12}/> AI COACH REPLY
           </div>
@@ -137,40 +135,80 @@ function CheckIn({ user }) {
   var [loading,       setLoading]       = useState(false);
   var [checkedToday,  setCheckedToday]  = useState(false);
   var [history,       setHistory]       = useState([]);
+  var [historyError,  setHistoryError]  = useState(null);
   var [streak,        setStreak]        = useState(0);
   var [tab,           setTab]           = useState("checkin");
   var [weekDays,      setWeekDays]      = useState([]);
 
   var loadAll = useCallback(function() {
     if (!user?.id) return;
-    Promise.all([
-      axios.get(API + "/checkin/history/" + user.id),
-      axios.get(API + "/checkin/streak/"  + user.id),
-    ]).then(function(res) {
-      var hist = Array.isArray(res[0].data) ? res[0].data : [];
-      var strk = res[1].data || {};
-      setHistory(hist);
-      setStreak(typeof strk.streak === "number" ? strk.streak : 0);
 
-      // Build set of IST date strings that have check-ins
+    var historyUrl = API + "/checkin/history/" + user.id;
+    var streakUrl  = API + "/checkin/streak/"  + user.id;
+
+    console.log("[CheckIn] Fetching:", historyUrl);
+
+    Promise.all([
+      axios.get(historyUrl),
+      axios.get(streakUrl),
+    ]).then(function(res) {
+      var rawHist = res[0].data;
+      var rawStrk = res[1].data || {};
+
+      console.log("[CheckIn] Raw history response:", rawHist);
+      console.log("[CheckIn] Streak response:", rawStrk);
+
+      // Handle both array and object responses
+      var hist = Array.isArray(rawHist) ? rawHist : (rawHist.checkins || rawHist.data || []);
+      console.log("[CheckIn] Parsed history count:", hist.length);
+
+      setHistory(hist);
+      setHistoryError(null);
+      setStreak(typeof rawStrk.streak === "number" ? rawStrk.streak : 0);
+
+      // Build set of IST date strings from check-ins
       var checkinDateSet = new Set(
-        hist.map(function(c) { return c.date || ""; }).filter(Boolean)
+        hist.map(function(c) {
+          // Prefer the "date" field (IST date from backend)
+          // Fall back to parsing created_at if date field missing
+          if (c.date) return c.date;
+          if (c.created_at) {
+            var d = new Date(c.created_at);
+            var ist = new Date(d.getTime() + IST_OFFSET * 60000);
+            return ist.toISOString().slice(0, 10);
+          }
+          return "";
+        }).filter(Boolean)
       );
 
-      // Build week grid and mark active days
+      console.log("[CheckIn] Check-in dates:", Array.from(checkinDateSet));
+
+      // Build week grid
       var days = buildWeekDays();
       days.forEach(function(d) {
         d.active = checkinDateSet.has(d.dateStr);
-        var entry = hist.find(function(c){ return c.date === d.dateStr; });
-        d.moodId  = entry ? entry.mood : null;
+        var entry = hist.find(function(c){
+          var dateKey = c.date || (function(){
+            if (!c.created_at) return "";
+            var dt = new Date(c.created_at);
+            var ist = new Date(dt.getTime() + IST_OFFSET * 60000);
+            return ist.toISOString().slice(0, 10);
+          })();
+          return dateKey === d.dateStr;
+        });
+        d.moodId = entry ? entry.mood : null;
       });
       setWeekDays(days);
 
-      // ✅ FIX: use IST date for today check (was using wrong locale string)
+      // ✅ Use IST date for today check
       var todayStr = getTodayIST();
+      console.log("[CheckIn] Today IST:", todayStr, "| Checked in?", checkinDateSet.has(todayStr));
       setCheckedToday(checkinDateSet.has(todayStr));
 
-    }).catch(function(e){ console.error("CheckIn load error:", e); });
+    }).catch(function(e){
+      console.error("[CheckIn] Load error:", e);
+      setHistoryError("Could not load check-in history. " + (e.message || ""));
+    });
   }, [user]);
 
   useEffect(function() { loadAll(); }, [loadAll]);
@@ -230,13 +268,13 @@ function CheckIn({ user }) {
         <div style={{ display:"flex", gap:8, marginTop:10, flexWrap:"wrap" }}>
           {streak > 0 && (
             <div style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 12px", borderRadius:20, background:"rgba(251,146,60,0.1)", border:"1px solid rgba(251,146,60,0.25)" }}>
-              <span style={{ fontSize:14 }}>🔥</span>
+              <span>🔥</span>
               <span style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:12, color:"#fb923c" }}>{streak} day streak</span>
             </div>
           )}
           {history.length > 0 && (
             <div style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 12px", borderRadius:20, background:"rgba(96,165,250,0.1)", border:"1px solid rgba(96,165,250,0.25)" }}>
-              <span style={{ fontSize:12 }}>📅</span>
+              <span>📅</span>
               <span style={{ fontFamily:"'Syne',sans-serif", fontWeight:700, fontSize:12, color:"#60a5fa" }}>{history.length} check-ins</span>
             </div>
           )}
@@ -291,6 +329,11 @@ function CheckIn({ user }) {
                 Come back tomorrow to keep your streak alive.
                 {streak > 0 && <><br/><span style={{ color:"#fb923c", fontWeight:700 }}>🔥 {streak} day streak — don't break it!</span></>}
               </div>
+              {/* Switch to history tab to see past entries */}
+              <button onClick={function(){ setTab("history"); }}
+                style={{ marginTop:16, padding:"10px 24px", borderRadius:12, border:"1px solid var(--border)", background:"transparent", color:"var(--muted)", fontSize:12, cursor:"pointer", fontFamily:"'Syne',sans-serif", fontWeight:700 }}>
+                📅 View History
+              </button>
             </div>
 
           ) : (
@@ -313,7 +356,7 @@ function CheckIn({ user }) {
               </div>
               <div style={{ marginBottom:16 }}>
                 <div style={{ fontSize:12, fontFamily:"'Syne',sans-serif", fontWeight:700, color:"var(--text)", marginBottom:8 }}>Anything on your mind? <span style={{ color:"var(--muted)", fontWeight:400 }}>(optional)</span></div>
-                <textarea className="ci-textarea" placeholder={"What's going on today?"} value={note}
+                <textarea className="ci-textarea" placeholder="What's going on today?" value={note}
                   onChange={function(e){ setNote(e.target.value); }} rows={3}
                   style={{ width:"100%", boxSizing:"border-box", borderRadius:12, padding:"12px 14px", fontSize:13, fontFamily:"'DM Sans',sans-serif", lineHeight:1.6, resize:"none" }}/>
               </div>
@@ -329,13 +372,24 @@ function CheckIn({ user }) {
       {/* ── HISTORY TAB ── */}
       {tab === "history" && (
         <div>
-          {history.length === 0 ? (
+          {/* Error state */}
+          {historyError && (
+            <div style={{ padding:"12px 16px", borderRadius:12, background:"rgba(248,113,113,0.08)", border:"1px solid rgba(248,113,113,0.3)", color:"#f87171", fontSize:12, marginBottom:16 }}>
+              ⚠️ {historyError}
+            </div>
+          )}
+
+          {history.length === 0 && !historyError ? (
             <div style={{ textAlign:"center", padding:"40px 20px", background:"var(--card)", borderRadius:20, border:"1px solid var(--border)" }}>
               <div style={{ fontSize:40, marginBottom:10 }}>📅</div>
               <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:15, color:"var(--text)", marginBottom:6 }}>No check-ins yet</div>
-              <div style={{ fontSize:12, color:"var(--muted)" }}>Complete your first check-in to start tracking your mood journey.</div>
+              <div style={{ fontSize:12, color:"var(--muted)", marginBottom:16 }}>Complete your first check-in to start tracking your mood journey.</div>
+              <button onClick={function(){ setTab("checkin"); }}
+                style={{ padding:"10px 24px", borderRadius:12, border:"none", background:"linear-gradient(135deg,#7c5cfc,#fc5cf0)", color:"white", fontSize:13, cursor:"pointer", fontFamily:"'Syne',sans-serif", fontWeight:700 }}>
+                ✨ Do First Check-in
+              </button>
             </div>
-          ) : (
+          ) : history.length > 0 ? (
             <div>
               {/* Week Calendar */}
               <div style={{ background:"var(--card)", borderRadius:16, padding:16, marginBottom:16, border:"1px solid var(--border)" }}>
@@ -379,7 +433,7 @@ function CheckIn({ user }) {
               <div style={{ fontSize:10, color:"var(--muted)", fontFamily:"'Syne',sans-serif", fontWeight:800, letterSpacing:"0.1em", marginBottom:10 }}>PAST CHECK-INS</div>
               {history.map(function(c){ return <HistoryCard key={c.id} c={c}/>; })}
             </div>
-          )}
+          ) : null}
         </div>
       )}
     </div>

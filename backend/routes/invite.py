@@ -1,22 +1,15 @@
 """
-routes/invite.py - Brevo SMTP VERSION
-Sends to anyone for free using Brevo SMTP
+routes/invite.py - Resend HTTP API VERSION
 """
 import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+import requests as http_requests
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
 
 invite_bp = Blueprint("invite", __name__)
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp-relay.brevo.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASS = os.getenv("SMTP_PASS", "")
-FROM_EMAIL = os.getenv("SMTP_FROM", "Manifesting Motivation <7b00a3001@smtp-brevo.com>")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 
 def get_sender(user_id):
     try:
@@ -31,21 +24,6 @@ def get_sender(user_id):
     except Exception as e:
         print(f"[invite] get_sender error: {e}")
     return "Someone", ""
-
-
-def send_smtp_email(to_email, subject, html_body):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = FROM_EMAIL
-    msg["To"] = to_email
-    msg.attach(MIMEText(html_body, "html"))
-    
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-        server.ehlo()
-        server.starttls()
-        server.login(SMTP_USER, SMTP_PASS)
-        server.sendmail(SMTP_USER, to_email, msg.as_string())
-
 
 def build_email_html(sender_name, invite_url):
     return f"""<!DOCTYPE html>
@@ -65,7 +43,7 @@ def build_email_html(sender_name, invite_url):
           <p style="font-size:22px;font-weight:700;color:#eeeeff;">You have been invited!</p>
           <p style="color:#9898c0;font-size:15px;line-height:1.75;">
             <strong style="color:#c4b5fd;">{sender_name}</strong> wants you to join
-            <strong style="color:#fff;">Manifesting Motivation AI</strong> - 
+            <strong style="color:#fff;">Manifesting Motivation AI</strong> -
             a personal growth app with AI coaching, goal tracking, and daily check-ins.
           </p>
           <table width="100%" style="margin:24px 0;">
@@ -98,7 +76,6 @@ def build_email_html(sender_name, invite_url):
 </body>
 </html>"""
 
-
 @invite_bp.route("/invite/send", methods=["POST", "OPTIONS"])
 def send_invite():
     if request.method == "OPTIONS":
@@ -112,31 +89,44 @@ def send_invite():
         return jsonify({"error": "Enter a valid email address"}), 400
     if not user_id:
         return jsonify({"error": "user_id required"}), 400
-    if not SMTP_USER or not SMTP_PASS:
+    if not RESEND_API_KEY:
         return jsonify({"error": "Email not configured"}), 500
 
     sender_name, _ = get_sender(user_id)
-    app_url    = "https://manifesting-motivation-ai.vercel.app"
-    invite_url = f"{app_url}?ref={user_id}"
+    invite_url = f"https://manifesting-motivation-ai.vercel.app?ref={user_id}"
 
     try:
-        subject = f"{sender_name} invited you to Manifesting Motivation AI"
-        html    = build_email_html(sender_name, invite_url)
-        send_smtp_email(to_email, subject, html)
-        print(f"[invite] Sent: {sender_name} to {to_email}")
-
-        try:
-            db = SessionLocal()
-            db.execute(sql_text(
-                "INSERT INTO invites (inviter_id, to_email, status, created_at) "
-                "VALUES (:uid, :email, \'sent\', NOW())"
-            ), {"uid": int(user_id), "email": to_email})
-            db.commit()
-            db.close()
-        except Exception as e:
-            print(f"[invite] DB error: {e}")
-
-        return jsonify({"success": True, "message": f"Invite sent to {to_email}!"})
+        response = http_requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "from": "Manifesting Motivation <onboarding@resend.dev>",
+                "to": [to_email],
+                "subject": f"{sender_name} invited you to Manifesting Motivation AI",
+                "html": build_email_html(sender_name, invite_url)
+            },
+            timeout=15
+        )
+        data_resp = response.json()
+        if response.status_code == 200 or response.status_code == 201:
+            print(f"[invite] Sent to {to_email}")
+            try:
+                db = SessionLocal()
+                db.execute(sql_text(
+                    "INSERT INTO invites (inviter_id, to_email, status, created_at) "
+                    "VALUES (:uid, :email, \'sent\', NOW())"
+                ), {"uid": int(user_id), "email": to_email})
+                db.commit()
+                db.close()
+            except Exception as e:
+                print(f"[invite] DB error: {e}")
+            return jsonify({"success": True, "message": f"Invite sent to {to_email}!"})
+        else:
+            print(f"[invite] Resend error: {data_resp}")
+            return jsonify({"error": data_resp.get("message", "Failed to send")}), 500
 
     except Exception as e:
         print(f"[invite] Error: {e}")

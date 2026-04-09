@@ -10,3 +10,4 @@ python-dotenv==1.0.0
 psycopg2-binary==2.9.9
 requests==2.31.0
 # rebuild-20260409103253
+httpx==0.28.1

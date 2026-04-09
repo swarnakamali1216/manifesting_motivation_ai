@@ -1,6 +1,7 @@
 """
-routes/invite.py — FIXED
-- Removed manual _cors() helper (app.py flask-cors handles it globally)
+routes/invite.py — FIXED v3
+- Port 587 + STARTTLS instead of 465 SSL (Render blocks port 465)
+- No manual _cors() — app.py flask-cors handles it
 - SMTP timeout=15 to prevent 502
 - Accepts both "email" and "to_email" fields
 """
@@ -17,7 +18,7 @@ load_dotenv()
 invite_bp = Blueprint("invite", __name__)
 
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))   # 587 STARTTLS — works on Render
 SMTP_USER = os.getenv("SMTP_USER", "").strip()
 SMTP_PASS = os.getenv("SMTP_PASS", "").replace(" ", "").strip()
 
@@ -141,7 +142,6 @@ def build_email_html(sender_name, sender_email, invite_url):
 
 @invite_bp.route("/invite/send", methods=["POST", "OPTIONS"])
 def send_invite():
-    # Handle preflight
     if request.method == "OPTIONS":
         return jsonify({}), 200
 
@@ -173,8 +173,11 @@ def send_invite():
 
     try:
         ctx = ssl.create_default_context()
-        # timeout=15 prevents 502 Gunicorn worker timeout on slow SMTP
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=15) as server:
+        # ✅ STARTTLS on port 587 — works on Render (port 465 SSL is blocked)
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+            server.ehlo()
+            server.starttls(context=ctx)
+            server.ehlo()
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(SMTP_USER, to_email, msg.as_string())
 
@@ -213,6 +216,7 @@ def test_config():
         "configured":  configured,
         "smtp_user":   SMTP_USER[:10] + "***" if SMTP_USER else "NOT SET",
         "pass_length": len(SMTP_PASS),
+        "smtp_port":   SMTP_PORT,
         "message":     "Ready ✅" if configured else "Add SMTP_USER + SMTP_PASS to .env"
     })
 

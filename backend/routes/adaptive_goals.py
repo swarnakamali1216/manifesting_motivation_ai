@@ -51,6 +51,8 @@ RULES:
 7. Difficulty curve: easy start → gradually harder → challenge at the end.
 
 CRITICAL RESOURCE RULES:
+- STYLE RULE (HIGHEST PRIORITY): {style_rule}
+- Override all other resource suggestions if they conflict with the style rule.
 - "resource" must be a REAL working URL starting with https://
 - Choose from these verified sources based on topic:
   Programming: https://www.freecodecamp.org  |  https://www.theodinproject.com  |  https://cs50.harvard.edu/x  |  https://javascript.info  |  https://docs.python.org/3/tutorial
@@ -88,6 +90,14 @@ Number of steps to generate: {num_steps}
 
 Generate exactly {num_steps} steps for this person to achieve "{title}" in {timeline}.
 Every step must fit in {daily_time}/day."""
+
+        style_urls = {
+            'videos':   'EVERY step resource MUST be YouTube: https://www.youtube.com/results?search_query=' + title.replace(' ','+') + '+tutorial',
+            'reading':  'EVERY step resource MUST be docs/articles: https://www.freecodecamp.org or https://developer.mozilla.org',
+            'practice': 'EVERY step resource MUST be practice: https://www.leetcode.com or https://www.hackerrank.com',
+            'mix':      'Mix YouTube, docs, and practice sites across different steps',
+        }
+        style_rule = style_urls.get(learning_style, style_urls['mix'])
 
         resp = get_groq().chat.completions.create(
             model    = "llama-3.3-70b-versatile",
@@ -367,6 +377,14 @@ def report_struggle(goal_id, step_index):
 
         roadmap   = json.loads(goal[1]) if goal[1] else []
         step_info = roadmap[step_index] if step_index < len(roadmap) else {}
+
+        style_urls = {
+            'videos':   'EVERY step resource MUST be YouTube: https://www.youtube.com/results?search_query=' + title.replace(' ','+') + '+tutorial',
+            'reading':  'EVERY step resource MUST be docs/articles: https://www.freecodecamp.org or https://developer.mozilla.org',
+            'practice': 'EVERY step resource MUST be practice: https://www.leetcode.com or https://www.hackerrank.com',
+            'mix':      'Mix YouTube, docs, and practice sites across different steps',
+        }
+        style_rule = style_urls.get(learning_style, style_urls['mix'])
 
         resp = get_groq().chat.completions.create(
             model    = "llama-3.3-70b-versatile",

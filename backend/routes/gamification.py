@@ -336,7 +336,7 @@ def award_post():
 def leaderboard():
     db = SessionLocal()
     try:
-        rows = db.execute(sql_text("SELECT id, name, xp, level, current_streak, badges FROM users WHERE is_active=TRUE ORDER BY xp DESC LIMIT 20")).fetchall()
+        rows = db.execute(sql_text("SELECT id, name, xp, level, current_streak, badges FROM users ORDER BY xp DESC LIMIT 20")).fetchall()
         result = []
         for i, r in enumerate(rows):
             held = _get_badge_ids(db, r[0])

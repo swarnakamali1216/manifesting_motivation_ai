@@ -24,3 +24,16 @@ content = content + fix
 open('backend/routes/db_health.py', 'w', encoding='utf-8').write(content)
 print('Done!')
 "
+
+
+@db_health_bp.route('/db/set-admin/<path:email>', methods=['GET'])
+def set_admin(email):
+    db = SessionLocal()
+    try:
+        db.execute(sql_text('UPDATE users SET is_admin=TRUE WHERE email=:email'), {'email': email})
+        db.commit()
+        return jsonify({'success': True, 'message': 'Admin granted to ' + email})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()

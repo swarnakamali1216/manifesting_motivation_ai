@@ -61,13 +61,11 @@ var PROMPTS = [
 
 
 function toIST(iso) {
-
   if (!iso) return new Date();
-
-  // Backend stores UTC. Add IST offset for display.
-
-  return new Date(new Date(iso).getTime() + 330 * 60000);
-
+  var s = (iso + "").replace(" ", "T");
+  if (!s.endsWith("Z") && !s.includes("+")) s += "Z";
+  var d = new Date(s);
+  return isNaN(d) ? new Date() : new Date(d.getTime() + 330 * 60000);
 }
 
 function safeDate(iso) {

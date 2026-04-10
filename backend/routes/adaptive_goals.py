@@ -300,7 +300,7 @@ Be real — find something genuine to praise."""},
         if existing:
             db.execute(sql_text("""
                 UPDATE goal_steps
-                SET completed=TRUE, completed_at=CURRENT_TIMESTAMP,
+                SET completed_at IS NOT NULL, completed_at=CURRENT_TIMESTAMP,
                     user_answer=:ans, ai_feedback=:fb, score=:sc
                 WHERE goal_id=:gid AND step_index=:si
             """), {"ans": user_answer, "fb": feedback, "sc": xp_gain * 6,
@@ -330,13 +330,13 @@ Be real — find something genuine to praise."""},
 
         # Check goal done
         done_cnt  = db.execute(sql_text(
-            "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed=TRUE"
+            "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed_at IS NOT NULL"
         ), {"gid": goal_id}).fetchone()[0]
         goal_done = done_cnt >= total and total > 0
 
         if goal_done:
             try:
-                db.execute(sql_text("UPDATE goals SET completed=TRUE WHERE id=:gid"), {"gid": goal_id})
+                db.execute(sql_text("UPDATE goals SET completed_at IS NOT NULL WHERE id=:gid"), {"gid": goal_id})
                 if user_id:
                     xp_row2 = db.execute(sql_text("SELECT xp FROM users WHERE id=:uid"), {"uid": user_id}).fetchone()
                     if xp_row2:

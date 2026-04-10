@@ -542,7 +542,7 @@ Keep it under 40 words. Be warm and encouraging."""
 
             if existing:
                 db.execute(sql_text(
-                    "UPDATE goal_steps SET completed=TRUE, user_answer=:ans, ai_feedback=:fb, score=:sc "
+                    "UPDATE goal_steps SET completed_at IS NOT NULL, user_answer=:ans, ai_feedback=:fb, score=:sc "
                     "WHERE goal_id=:gid AND step_index=:si"
                 ), {"ans": answer[:500], "fb": feedback, "sc": 100 if not skipped else 70,
                     "gid": goal_id, "si": step_index})
@@ -568,10 +568,10 @@ Keep it under 40 words. Be warm and encouraging."""
                 else:
                     total = len(rm)
                 done = db.execute(sql_text(
-                    "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed=TRUE"
+                    "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed_at IS NOT NULL"
                 ), {"gid": goal_id}).fetchone()[0]
                 if total > 0 and done >= total:
-                    db.execute(sql_text("UPDATE goals SET completed=TRUE, is_complete=TRUE WHERE id=:gid"), {"gid": goal_id})
+                    db.execute(sql_text("UPDATE goals SET completed_at IS NOT NULL, is_complete=TRUE WHERE id=:gid"), {"gid": goal_id})
                     db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+100 WHERE id=:uid"), {"uid": user_id})
                     db.commit()
                     goal_completed = True
@@ -684,7 +684,7 @@ def complete_goal(goal_id):
         row = db.execute(sql_text("SELECT user_id FROM goals WHERE id=:gid"), {"gid": goal_id}).fetchone()
         if not row:
             return jsonify({"error": "Goal not found"}), 404
-        db.execute(sql_text("UPDATE goals SET completed=TRUE, is_complete=TRUE WHERE id=:gid"), {"gid": goal_id})
+        db.execute(sql_text("UPDATE goals SET completed_at IS NOT NULL, is_complete=TRUE WHERE id=:gid"), {"gid": goal_id})
         db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+50 WHERE id=:uid"), {"uid": row[0]})
         db.commit()
         return jsonify({"message": "Goal completed! +50 XP!"})
@@ -717,7 +717,7 @@ def predict_goals(user_id):
     db = SessionLocal()
     try:
         goals = db.execute(sql_text(
-            "SELECT id, title, category, completed FROM goals WHERE user_id=:uid AND completed=FALSE"
+            "SELECT id, title, category, completed FROM goals WHERE user_id=:uid AND completed_at IS NULL"
         ), {"uid": user_id}).fetchall()
 
         sessions = db.execute(sql_text(
@@ -730,7 +730,7 @@ def predict_goals(user_id):
         predictions = []
         for g in goals:
             steps_done = db.execute(sql_text(
-                "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed=TRUE"
+                "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed_at IS NOT NULL"
             ), {"gid": g[0]}).fetchone()[0] or 0
 
             total_steps = db.execute(sql_text(

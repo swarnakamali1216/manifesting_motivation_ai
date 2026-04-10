@@ -260,7 +260,7 @@ def daily_nudge(user_id):
         ), {"uid": user_id}).fetchall()
 
         goal = db.execute(sql_text(
-            "SELECT id,title FROM goals WHERE user_id=:uid AND (completed=FALSE OR completed IS NULL) ORDER BY id DESC LIMIT 1"
+            "SELECT id,title FROM goals WHERE user_id=:uid AND (completed_at IS NULL OR completed IS NULL) ORDER BY id DESC LIMIT 1"
         ), {"uid": user_id}).fetchone()
         goal_id    = goal[0] if goal else None
         goal_title = goal[1] if goal else None
@@ -269,7 +269,7 @@ def daily_nudge(user_id):
         if goal_id:
             try:
                 steps_done = db.execute(sql_text(
-                    "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed=TRUE"
+                    "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed_at IS NOT NULL"
                 ), {"gid": goal_id}).fetchone()[0] or 0
             except Exception: pass
 

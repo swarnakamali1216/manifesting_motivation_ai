@@ -41,6 +41,12 @@ def generate_adaptive_roadmap(title, category, daily_time, learning_style,
     try:
         system_prompt = f"""You are a Senior Learning Architect who creates precise, actionable roadmaps.
 
+LEARNING STYLE ENFORCEMENT (HIGHEST PRIORITY - NEVER IGNORE - current style: {learning_style}):
+- If learning_style is "videos": EVERY resource URL must be a real YouTube search URL like https://www.youtube.com/results?search_query=TOPIC+tutorial - NO websites, NO articles, ONLY YouTube links
+- If learning_style is "reading": EVERY resource must be a documentation/article URL - use https://developer.mozilla.org, https://docs.python.org, https://www.freecodecamp.org/news, https://realpython.com - NO YouTube links
+- If learning_style is "practice": EVERY resource must be a hands-on practice URL - use https://www.leetcode.com, https://www.hackerrank.com, https://www.kaggle.com, https://replit.com, https://codesandbox.io - NO videos, NO articles
+- If learning_style is "mix": Use a variety - some YouTube, some docs, some practice sites - rotate across steps
+
 RULES:
 1. Generate EXACTLY {num_steps} steps — no more, no fewer.
 2. Each step fits the user's daily time budget ({daily_time}).
@@ -51,8 +57,6 @@ RULES:
 7. Difficulty curve: easy start → gradually harder → challenge at the end.
 
 CRITICAL RESOURCE RULES:
-- STYLE RULE (HIGHEST PRIORITY): {style_rule}
-- Override all other resource suggestions if they conflict with the style rule.
 - "resource" must be a REAL working URL starting with https://
 - Choose from these verified sources based on topic:
   Programming: https://www.freecodecamp.org  |  https://www.theodinproject.com  |  https://cs50.harvard.edu/x  |  https://javascript.info  |  https://docs.python.org/3/tutorial
@@ -91,13 +95,6 @@ Number of steps to generate: {num_steps}
 Generate exactly {num_steps} steps for this person to achieve "{title}" in {timeline}.
 Every step must fit in {daily_time}/day."""
 
-        style_urls = {
-            'videos':   'EVERY step resource MUST be YouTube: https://www.youtube.com/results?search_query=' + title.replace(' ','+') + '+tutorial',
-            'reading':  'EVERY step resource MUST be docs/articles: https://www.freecodecamp.org or https://developer.mozilla.org',
-            'practice': 'EVERY step resource MUST be practice: https://www.leetcode.com or https://www.hackerrank.com',
-            'mix':      'Mix YouTube, docs, and practice sites across different steps',
-        }
-        style_rule = style_urls.get(learning_style, style_urls['mix'])
 
         resp = get_groq().chat.completions.create(
             model    = "llama-3.3-70b-versatile",
@@ -378,13 +375,6 @@ def report_struggle(goal_id, step_index):
         roadmap   = json.loads(goal[1]) if goal[1] else []
         step_info = roadmap[step_index] if step_index < len(roadmap) else {}
 
-        style_urls = {
-            'videos':   'EVERY step resource MUST be YouTube: https://www.youtube.com/results?search_query=' + title.replace(' ','+') + '+tutorial',
-            'reading':  'EVERY step resource MUST be docs/articles: https://www.freecodecamp.org or https://developer.mozilla.org',
-            'practice': 'EVERY step resource MUST be practice: https://www.leetcode.com or https://www.hackerrank.com',
-            'mix':      'Mix YouTube, docs, and practice sites across different steps',
-        }
-        style_rule = style_urls.get(learning_style, style_urls['mix'])
 
         resp = get_groq().chat.completions.create(
             model    = "llama-3.3-70b-versatile",

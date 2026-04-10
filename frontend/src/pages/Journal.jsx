@@ -121,7 +121,7 @@ function MoodStreak({ entries }) {
 
     // Convert UTC created_at to IST date string so keys match the week loop below
 
-    var raw1 = e.created_at ? (e.created_at+"").replace(" ","T") : null; if(raw1 && !raw1.endsWith("Z") && !raw1.includes("+")) raw1+="Z"; var dt = raw1 ? new Date(raw1) : new Date(); var d = isNaN(dt) ? "" : new Date(dt.getTime() + IST_MS).toISOString().slice(0,10);
+    var raw = (e.created_at + "").replace(" ", "T"); if (!raw.endsWith("Z") && !raw.includes("+")) raw += "Z"; var dt = new Date(raw); if (isNaN(dt)) return; var d = new Date(dt.getTime() + IST_MS).toISOString().slice(0, 10);
 
     if (d) days[d] = e.mood || "okay";
 

@@ -81,8 +81,9 @@ def add_journal():
             print(f"[journal AI insight] {e}")
 
         row = db.execute(sql_text(
-            "INSERT INTO journal_entries (user_id, content, mood, mood_score, ai_insight) "
-            "VALUES (:uid, :content, :mood, :score, :insight) RETURNING id"
+            
+            "INSERT INTO journal_entries (user_id, content, mood, mood_score, ai_insight, created_at) "
+            "VALUES (:uid, :content, :mood, :score, :insight, NOW()) RETURNING id"
         ), {"uid": user_id, "content": content, "mood": mood,
             "score": mood_score, "insight": ai_insight}).fetchone()
         db.commit()

@@ -44,7 +44,7 @@ function speakWithBrowser(text, voiceId, onEnd) {
     });
     var u   = new SpeechSynthesisUtterance(text);
     u.rate  = 0.92; u.lang = "en-IN"; u.pitch = 1.05;
-    if (match.length)       u.voice = match[0];
+    if (match.length)         u.voice = match[0];
     else if (enVoices.length) u.voice = enVoices[0];
     u.onend   = function(){ if (onEnd) onEnd(); };
     u.onerror = function(){ if (onEnd) onEnd(); };
@@ -131,39 +131,52 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
   }
 
   // ── Test voice — tries ElevenLabs first, silently falls back to browser TTS
+  // Uses validateStatus so axios never throws on 503 — no console errors
   function handleTestVoice() {
     if (testingVoice) return;
     setTestingVoice(true);
     setVoiceSource("");
     var text = "Hello! I'm your AI coach. Let's achieve your goals together!";
 
-    axios.post(API+"/speak", { text: text, voice_name: voiceId }, { responseType: "blob" })
-      .then(function(r) {
-        // Check if backend returned a fallback JSON instead of audio
-        var contentType = r.headers["content-type"] || "";
-        if (contentType.includes("application/json")) {
-          // Backend says use browser TTS
-          setVoiceSource("browser");
-          speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
-          return;
-        }
-        // ElevenLabs audio — play it
-        setVoiceSource("elevenlabs");
-        var url   = URL.createObjectURL(r.data);
-        var audio = new Audio(url);
-        audio.onended = function(){ URL.revokeObjectURL(url); setTestingVoice(false); };
-        audio.onerror = function(){ URL.revokeObjectURL(url); setTestingVoice(false); };
-        audio.play().catch(function(){
-          URL.revokeObjectURL(url);
-          setVoiceSource("browser");
-          speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
-        });
-      })
-      .catch(function() {
-        // ElevenLabs unavailable — browser TTS fallback
+    axios.post(
+      API+"/speak",
+      { text: text, voice_name: voiceId },
+      {
+        responseType: "blob",
+        validateStatus: function(status) { return true; }, // never throw on any status
+      }
+    ).then(function(r) {
+      // 503 or any non-200 → use browser TTS
+      if (r.status !== 200) {
+        setVoiceSource("browser");
+        speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
+        return;
+      }
+
+      // Check content type — if JSON blob, backend is signalling fallback
+      var contentType = r.headers["content-type"] || "";
+      if (contentType.includes("application/json")) {
+        setVoiceSource("browser");
+        speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
+        return;
+      }
+
+      // ElevenLabs audio — play it
+      setVoiceSource("elevenlabs");
+      var url   = URL.createObjectURL(r.data);
+      var audio = new Audio(url);
+      audio.onended = function(){ URL.revokeObjectURL(url); setTestingVoice(false); };
+      audio.onerror = function(){ URL.revokeObjectURL(url); setTestingVoice(false); };
+      audio.play().catch(function(){
+        URL.revokeObjectURL(url);
         setVoiceSource("browser");
         speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
       });
+    }).catch(function() {
+      // Network error — browser TTS fallback
+      setVoiceSource("browser");
+      speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
+    });
   }
 
   function handleRequestNotif() {

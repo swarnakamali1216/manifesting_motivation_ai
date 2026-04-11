@@ -15,7 +15,7 @@ ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
 # Validate key on startup
 _KEY_VALID = False
-if ELEVENLABS_KEY and len(ELEVENLABS_KEY) == 64:
+if ELEVENLABS_KEY and len(ELEVENLABS_KEY) >= 32:
     try:
         _test = req_lib.get(
             "https://api.elevenlabs.io/v1/user",
@@ -31,7 +31,7 @@ if ELEVENLABS_KEY and len(ELEVENLABS_KEY) == 64:
         print(f"🔊 ElevenLabs: ⚠️ Could not validate key ({_e}) — will try on first request")
 else:
     if ELEVENLABS_KEY:
-        print(f"🔊 ElevenLabs: ❌ Key length {len(ELEVENLABS_KEY)} is wrong (need 64) — browser TTS fallback active")
+        print(f"🔊 ElevenLabs: ❌ Key too short ({len(ELEVENLABS_KEY)}) — browser TTS fallback active")
     else:
         print("🔊 ElevenLabs: ❌ No API key set — browser TTS fallback active")
 
@@ -48,7 +48,6 @@ def speak():
     if not text:
         return jsonify({"error": "No text provided"}), 400
 
-    # If key is known invalid, tell frontend to use browser TTS immediately
     if not _KEY_VALID:
         return jsonify({
             "error":    "ElevenLabs unavailable — use browser TTS",
@@ -87,7 +86,6 @@ def speak():
                 headers={"Content-Type": "audio/mpeg", "Cache-Control": "no-cache"},
             )
 
-        # Any error → tell frontend to use browser TTS
         print(f"❌ ElevenLabs: HTTP {resp.status_code}")
         return jsonify({"error": f"ElevenLabs error {resp.status_code}", "fallback": True}), 503
 

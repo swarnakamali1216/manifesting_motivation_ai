@@ -10,7 +10,8 @@ import os, requests as req_lib
 
 elevenlabs_bp = Blueprint("elevenlabs", __name__)
 
-ELEVENLABS_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+
+ELEVENLABS_KEY = (os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_KEY_TEST") or "").strip()
 ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
 # Validate key on startup

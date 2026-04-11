@@ -28,6 +28,30 @@ var TABS = [
   { id:"account",       label:"Account"       },
 ];
 
+// ── Browser TTS helper — works even when ElevenLabs is unavailable ────────
+function speakWithBrowser(text, voiceId, onEnd) {
+  try {
+    window.speechSynthesis.cancel();
+    var femaleIds = ["EXAVITQu4vr4xnSDxMaL","21m00Tcm4TlvDq8ikWAM","AZnzlk1XvdvUeBnXmlld","MF3mGyEYCl7XYWbV9V6O"];
+    var isFemale  = femaleIds.includes(voiceId);
+    var voices    = window.speechSynthesis.getVoices();
+    var enVoices  = voices.filter(function(v){ return v.lang && v.lang.startsWith("en"); });
+    var match     = enVoices.filter(function(v){
+      var n = v.name.toLowerCase();
+      return isFemale
+        ? /\b(sara|rachel|elli|aria|zira|susan|karen|victoria|samantha|female|woman)\b/.test(n)
+        : /\b(josh|james|daniel|david|alex|mark|lee|male|man)\b/.test(n);
+    });
+    var u   = new SpeechSynthesisUtterance(text);
+    u.rate  = 0.92; u.lang = "en-IN"; u.pitch = 1.05;
+    if (match.length)       u.voice = match[0];
+    else if (enVoices.length) u.voice = enVoices[0];
+    u.onend   = function(){ if (onEnd) onEnd(); };
+    u.onerror = function(){ if (onEnd) onEnd(); };
+    window.speechSynthesis.speak(u);
+  } catch(e) { if (onEnd) onEnd(); }
+}
+
 function Toggle({ value, onChange, color }) {
   var c = color || "var(--accent)";
   return (
@@ -61,22 +85,17 @@ function Row({ label, sub, right, onClick }) {
 function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
   var uid = user ? user.id : null;
 
-  // ✅ FIX: Read from localStorage("theme") which is what App.jsx writes
-  // darkMode = theme is NOT "light"
-  var [isDark, setIsDark] = useState(function(){
-    return localStorage.getItem("theme") !== "light";
-  });
+  var [isDark,        setIsDark]        = useState(function(){ return localStorage.getItem("theme") !== "light"; });
+  var [tab,           setTab]           = useState("appearance");
+  var [accentColor,   setAccentColor]   = useState(localStorage.getItem("accent_color")||"purple");
+  var [voiceAuto,     setVoiceAuto]     = useState(localStorage.getItem("voice_auto")==="true");
+  var [voiceId,       setVoiceId]       = useState(localStorage.getItem("voice_persona")||"EXAVITQu4vr4xnSDxMaL");
+  var [notifPerm,     setNotifPerm]     = useState(typeof Notification!=="undefined"?Notification.permission:"default");
+  var [notifEnabled,  setNotifEnabled]  = useState(localStorage.getItem("notif_enabled")==="true");
+  var [streakNum,     setStreakNum]      = useState(0);
+  var [testingVoice,  setTestingVoice]  = useState(false);
+  var [voiceSource,   setVoiceSource]   = useState(""); // "elevenlabs" | "browser" | ""
 
-  var [tab,          setTab]          = useState("appearance");
-  var [accentColor,  setAccentColor]  = useState(localStorage.getItem("accent_color")||"purple");
-  var [voiceAuto,    setVoiceAuto]    = useState(localStorage.getItem("voice_auto")==="true");
-  var [voiceId,      setVoiceId]      = useState(localStorage.getItem("voice_persona")||"EXAVITQu4vr4xnSDxMaL");
-  var [notifPerm,    setNotifPerm]    = useState(typeof Notification!=="undefined"?Notification.permission:"default");
-  var [notifEnabled, setNotifEnabled] = useState(localStorage.getItem("notif_enabled")==="true");
-  var [streakNum,    setStreakNum]    = useState(0);
-  var [testingVoice, setTestingVoice]= useState(false);
-
-  // Sync isDark when prop changes (e.g. from outside toggle)
   useEffect(function(){
     setIsDark(localStorage.getItem("theme") !== "light");
   }, [darkModeProp]);
@@ -90,16 +109,10 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
 
   function handleDarkMode(val) {
     setIsDark(val);
-    // ✅ Write "theme" key — same key App.jsx reads
     localStorage.setItem("theme", val ? "dark" : "light");
     if (toggleTheme) {
-      // Only call toggleTheme if the state actually needs to change
-      // toggleTheme compares with its own darkMode state
-      var appDark = localStorage.getItem("theme") !== "light";
-      if (appDark !== val) toggleTheme();
-      else toggleTheme(); // call anyway so App re-renders with correct class
+      toggleTheme();
     } else {
-      // Fallback: apply directly
       document.documentElement.classList.toggle("dark", val);
       document.documentElement.classList.toggle("light", !val);
     }
@@ -117,37 +130,39 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
     localStorage.setItem("voice_auto", String(val));
   }
 
+  // ── Test voice — tries ElevenLabs first, silently falls back to browser TTS
   function handleTestVoice() {
     if (testingVoice) return;
     setTestingVoice(true);
-    axios.post(API+"/speak",{text:"Hello! I'm your AI coach. Let's achieve your goals together!",voice_name:voiceId},{responseType:"blob"})
-      .then(function(r){
+    setVoiceSource("");
+    var text = "Hello! I'm your AI coach. Let's achieve your goals together!";
+
+    axios.post(API+"/speak", { text: text, voice_name: voiceId }, { responseType: "blob" })
+      .then(function(r) {
+        // Check if backend returned a fallback JSON instead of audio
+        var contentType = r.headers["content-type"] || "";
+        if (contentType.includes("application/json")) {
+          // Backend says use browser TTS
+          setVoiceSource("browser");
+          speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
+          return;
+        }
+        // ElevenLabs audio — play it
+        setVoiceSource("elevenlabs");
         var url   = URL.createObjectURL(r.data);
         var audio = new Audio(url);
         audio.onended = function(){ URL.revokeObjectURL(url); setTestingVoice(false); };
-        audio.onerror = function(){ setTestingVoice(false); };
-        audio.play().catch(function(){ setTestingVoice(false); });
+        audio.onerror = function(){ URL.revokeObjectURL(url); setTestingVoice(false); };
+        audio.play().catch(function(){
+          URL.revokeObjectURL(url);
+          setVoiceSource("browser");
+          speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
+        });
       })
-      .catch(function(){
-        try {
-          // ElevenLabs unavailable — use browser TTS with voice gender matching
-          var voices = window.speechSynthesis.getVoices();
-          var femaleIds = ["EXAVITQu4vr4xnSDxMaL","21m00Tcm4TlvDq8ikWAM","AZnzlk1XvdvUeBnXmlld","MF3mGyEYCl7XYWbV9V6O"];
-          var isFemale = femaleIds.includes(voiceId);
-          var pool = voices.filter(function(v){ return v.lang && v.lang.startsWith("en"); });
-          var match = pool.filter(function(v){
-            var n = v.name.toLowerCase();
-            return isFemale
-              ? /\b(sara|rachel|elli|aria|zira|susan|karen|victoria|samantha|female|woman)\b/.test(n)
-              : /\b(josh|james|daniel|david|alex|mark|lee|male|man)\b/.test(n);
-          });
-          var chosenVoice = (match.length ? match[0] : pool[0]) || null;
-          var u = new SpeechSynthesisUtterance("Hello! I'm your AI coach. Let's achieve your goals!");
-          u.rate = 0.92; u.lang = "en-IN";
-          if (chosenVoice) u.voice = chosenVoice;
-          window.speechSynthesis.speak(u);
-          u.onend = function(){ setTestingVoice(false); };
-        } catch(e){ setTestingVoice(false); }
+      .catch(function() {
+        // ElevenLabs unavailable — browser TTS fallback
+        setVoiceSource("browser");
+        speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
       });
   }
 
@@ -202,19 +217,15 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
           <>
             <div style={{marginBottom:24,paddingBottom:24,borderBottom:"1px solid var(--border)"}}>
               <SectionLabel>Theme</SectionLabel>
-              {/* ✅ FIX: label changes based on isDark state, not a hardcoded string */}
               <Row
                 label={isDark ? "Dark Mode 🌙" : "Light Mode ☀️"}
                 sub={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
                 right={<Toggle value={isDark} onChange={handleDarkMode}/>}
               />
               <div style={{fontSize:11,color:"var(--muted)",marginTop:6,paddingLeft:4,lineHeight:1.6}}>
-                {isDark
-                  ? "Dark mode is ON. UI uses deep dark backgrounds."
-                  : "Light mode is ON. UI uses bright backgrounds."}
+                {isDark ? "Dark mode is ON." : "Light mode is ON."}
               </div>
             </div>
-
             <div>
               <SectionLabel>Accent Color</SectionLabel>
               <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:14,padding:16,marginBottom:14}}>
@@ -250,8 +261,10 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                 When ON: AI replies are spoken aloud via ElevenLabs or browser TTS.
               </div>
             </div>
+
             <SectionLabel>Voice Settings</SectionLabel>
             <Row label="Auto-speak AI replies" sub="AI responses are read aloud automatically" right={<Toggle value={voiceAuto} onChange={handleVoiceAuto} color="#4ade80"/>}/>
+
             {voiceAuto && (
               <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:14,padding:14,marginBottom:7}}>
                 <div style={{fontSize:10,fontWeight:800,color:"var(--muted)",letterSpacing:".1em",marginBottom:11,fontFamily:"'Syne',sans-serif"}}>CHOOSE VOICE</div>
@@ -271,8 +284,21 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                     );
                   })}
                 </div>
+
+                {/* Voice source indicator */}
+                {voiceSource && (
+                  <div style={{
+                    padding:"7px 11px", borderRadius:9, marginBottom:9,
+                    background: voiceSource==="elevenlabs" ? "rgba(74,222,128,0.08)" : "rgba(124,92,252,0.08)",
+                    border:"1px solid "+(voiceSource==="elevenlabs"?"rgba(74,222,128,0.2)":"rgba(124,92,252,0.2)"),
+                    fontSize:11, color: voiceSource==="elevenlabs"?"#4ade80":"var(--accent)", fontWeight:600,
+                  }}>
+                    {voiceSource==="elevenlabs" ? "✅ Playing via ElevenLabs AI voice" : "🔊 Playing via browser voice (ElevenLabs unavailable)"}
+                  </div>
+                )}
+
                 <button onClick={handleTestVoice} disabled={testingVoice}
-                  style={{width:"100%",padding:10,borderRadius:11,border:"1px solid var(--border)",background:testingVoice?"rgba(124,92,252,0.1)":"var(--card)",color:testingVoice?"var(--accent)":"var(--text)",fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,cursor:testingVoice?"not-allowed":"pointer"}}>
+                  style={{width:"100%",padding:10,borderRadius:11,border:"1px solid var(--border)",background:testingVoice?"rgba(124,92,252,0.1)":"var(--card)",color:testingVoice?"var(--accent)":"var(--text)",fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,cursor:testingVoice?"not-allowed":"pointer",transition:"all .18s"}}>
                   {testingVoice ? "🔊 Playing..." : "▶ Test this voice"}
                 </button>
               </div>
@@ -292,10 +318,10 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
             </div>
             <SectionLabel>What We Store</SectionLabel>
             {[
-              {icon:"💬",label:"AI conversations",     sub:"Messages and replies for mood tracking"},
-              {icon:"📔",label:"Journal entries",       sub:"Encrypted · Only you can read"},
-              {icon:"🎯",label:"Goals and roadmaps",    sub:"Your goals, steps, XP earned"},
-              {icon:"✅",label:"Check-in history",      sub:"Daily mood and energy data"},
+              {icon:"💬",label:"AI conversations",  sub:"Messages and replies for mood tracking"},
+              {icon:"📔",label:"Journal entries",    sub:"Encrypted · Only you can read"},
+              {icon:"🎯",label:"Goals and roadmaps", sub:"Your goals, steps, XP earned"},
+              {icon:"✅",label:"Check-in history",   sub:"Daily mood and energy data"},
             ].map(function(item){
               return (
                 <div key={item.label} style={{display:"flex",gap:11,padding:"12px 14px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:13,marginBottom:7,alignItems:"flex-start"}}>
@@ -386,13 +412,12 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                 </div>
               </div>
             )}
-
             <SectionLabel>Quick Links</SectionLabel>
             {[
-              {icon:"🎯",label:"My Goals",    sub:"View your goals",       page:"goals"  },
-              {icon:"📔",label:"My Journal",  sub:"Your journal entries",  page:"journal"},
-              {icon:"⚡",label:"Badges & XP", sub:"Your achievements",     page:"badges" },
-              {icon:"📖",label:"My Story",    sub:"Your journey",          page:"my-story"},
+              {icon:"🎯",label:"My Goals",    sub:"View your goals",      page:"goals"   },
+              {icon:"📔",label:"My Journal",  sub:"Your journal entries", page:"journal" },
+              {icon:"⚡",label:"Badges & XP", sub:"Your achievements",    page:"badges"  },
+              {icon:"📖",label:"My Story",    sub:"Your journey",         page:"my-story"},
             ].map(function(item){
               return (
                 <div key={item.page} onClick={function(){ if(onNavigate) onNavigate(item.page); }}
@@ -408,7 +433,6 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                 </div>
               );
             })}
-
             <button onClick={function(){
               localStorage.clear();
               document.documentElement.classList.remove("dark");
@@ -424,4 +448,3 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
 }
 
 export default Settings;
-

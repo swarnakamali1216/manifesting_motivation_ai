@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
+
+import React, { useState } from "react";
 import axios from "axios";
 
 var API = "https://manifesting-motivation-backend.onrender.com/api";

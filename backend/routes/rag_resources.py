@@ -254,6 +254,7 @@ def rag_status():
 def reseed():
     """Re-seed ChromaDB — call if collection is empty."""
     global _chroma_ready
-    _chroma_ready = _init_chromadb()
+    # Do NOT initialize on import — too heavy for free tier (downloads 79MB ONNX model)
+    _chroma_ready = False
     count = _chroma_collection.count() if _chroma_collection else 0
     return jsonify({"seeded": _chroma_ready, "count": count})

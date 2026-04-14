@@ -1,9 +1,11 @@
 """
-routes/invite.py — FIXED VERSION
-Changes from original:
-  1. Added /invite/join route — records when someone signs up via invite link
-     and awards 50 XP to the inviter. Original had no way to track this.
-  2. /invite/stats now also returns joined_count separately from sent_count.
+routes/invite.py — FULLY FIXED
+Fixes:
+  1. /invite/stats — sent_count = only emails sent (status='sent')
+                     joined_count = only people who joined (status='joined')
+                     They are SEPARATE — joining does NOT add to sent count.
+  2. /invite/join — stores joined_user_id, awards 50 XP to inviter.
+  3. All DB timestamps stored as UTC (correct). Frontend must convert to IST.
 """
 import os
 import requests as http_requests
@@ -120,6 +122,7 @@ def send_invite():
             print(f"[invite] Sent to {to_email}")
             try:
                 db = SessionLocal()
+                # FIX: status='sent' means email was sent — NOT joined
                 db.execute(sql_text(
                     "INSERT INTO invites (inviter_id, to_email, status, created_at) "
                     "VALUES (:uid, :email, 'sent', NOW())"
@@ -144,14 +147,17 @@ def get_invite_link(user_id):
     return jsonify({"link": link, "user_id": user_id})
 
 
-# FIX: New route — records when someone signs up via invite link
-# Call this from your React signup flow when ?ref= is in the URL
 @invite_bp.route("/invite/join", methods=["POST"])
 def record_join():
     """
     Called from React signup when ?ref=USER_ID is in the URL.
     Body: { new_user_id, ref_user_id }
-    Awards 50 XP to the inviter and records the join.
+
+    FIX: This inserts a NEW row with status='joined' — completely separate
+    from the 'sent' rows. So:
+      sent_count  = number of email invites sent
+      joined_count = number of people who actually joined
+    They NEVER overlap or double-count.
     """
     data        = request.get_json() or {}
     new_user_id = data.get("new_user_id")
@@ -162,7 +168,8 @@ def record_join():
 
     db = SessionLocal()
     try:
-        # Record the join — ON CONFLICT DO NOTHING prevents double-counting
+        # FIX: Insert with status='joined' and joined_user_id set
+        # ON CONFLICT DO NOTHING prevents awarding XP twice for same join
         db.execute(sql_text(
             "INSERT INTO invites (inviter_id, to_email, status, joined_user_id, created_at) "
             "VALUES (:uid, 'direct_link', 'joined', :jid, NOW()) "
@@ -186,25 +193,35 @@ def record_join():
 
 @invite_bp.route("/invite/stats/<int:user_id>", methods=["GET"])
 def get_invite_stats(user_id):
+    """
+    FIX: sent_count  = rows where status='sent'   (email invites sent)
+         joined_count = rows where status='joined' (people who actually joined)
+         These are ALWAYS separate — a join does NOT increment sent_count.
+    """
     db = SessionLocal()
     try:
         sent_row = db.execute(sql_text(
             "SELECT COUNT(*) FROM invites WHERE inviter_id=:uid AND status='sent'"
         ), {"uid": user_id}).fetchone()
+
         joined_row = db.execute(sql_text(
             "SELECT COUNT(*) FROM invites WHERE inviter_id=:uid AND status='joined'"
         ), {"uid": user_id}).fetchone()
+
         sent_count   = sent_row[0]   if sent_row   else 0
         joined_count = joined_row[0] if joined_row else 0
-        total        = sent_count + joined_count
+
         return jsonify({
-            "total_invites":  total,
-            "sent_count":     sent_count,
-            "joined_count":   joined_count,
+            "total_invites":  sent_count,      # total emails sent
+            "sent_count":     sent_count,       # emails sent
+            "joined_count":   joined_count,     # people who actually joined
             "user_id":        user_id,
             "xp_earned":      joined_count * 50,
         })
     except Exception:
-        return jsonify({"total_invites": 0, "sent_count": 0, "joined_count": 0, "user_id": user_id, "xp_earned": 0})
+        return jsonify({
+            "total_invites": 0, "sent_count": 0,
+            "joined_count": 0, "user_id": user_id, "xp_earned": 0
+        })
     finally:
         db.close()

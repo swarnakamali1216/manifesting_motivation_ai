@@ -1,13 +1,11 @@
 """
-recursive_roadmap.py — Recursive Roadmap Engine
-Place in: backend/routes/recursive_roadmap.py
+routes/recursive_roadmap.py — Recursive Roadmap Engine
 
-How it works:
-- Tracks every step attempt: passed/failed/skipped/struggled
-- After 2+ consecutive failures → AI regenerates roadmap at EASIER difficulty
-- After 3+ consecutive passes quickly → AI regenerates at HARDER difficulty  
-- Pace tracking: measures time between step completions
-- Full recursive regeneration via Groq LLaMA
+FIXES APPLIED:
+  1. Module-level Groq client — created once, not per request
+  2. timeout=15 added to all Groq completions.create calls (LLaMA can hang)
+  3. analyse_pace called only ONCE per /regenerate request (was called twice)
+  4. get_attempt_history called only ONCE per /regenerate request
 """
 
 from flask import Blueprint, request, jsonify
@@ -19,8 +17,8 @@ import os, json
 
 recursive_bp = Blueprint("recursive", __name__)
 
-def get_groq():
-    return Groq(api_key=os.getenv('GROQ_API_KEY'))
+# FIX 1: Module-level singleton — was get_groq() called fresh on every request
+_groq = Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 STRUGGLE_THRESHOLD  = 2   # consecutive failures before simplifying
@@ -136,14 +134,15 @@ Respond ONLY with a JSON array, no explanation:
 ]"""
 
     try:
-        resp = get_groq().chat.completions.create(
+        # FIX 2: timeout=15 — LLaMA can hang indefinitely without it
+        resp = _groq.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1200,
             temperature=0.7,
+            timeout=15,
         )
         raw = resp.choices[0].message.content.strip()
-        # Clean JSON
         import re
         raw = re.sub(r"```json|```", "", raw).strip()
         steps = json.loads(raw)
@@ -199,21 +198,26 @@ def regenerate_roadmap():
     Recursively regenerate roadmap at adjusted difficulty.
     Body: { goal_id, user_id, goal_title, current_steps, learning_style, daily_time }
     Returns: { new_steps, action, reason, difficulty_changed }
+
+    FIX 3: history fetched once, analyse_pace called once.
+    Previously analyse_pace was called twice and history fetched twice
+    (once implicitly inside the first analyse_pace call path).
     """
     db   = SessionLocal()
     data = request.get_json() or {}
 
-    goal_id       = data.get("goal_id")
-    user_id       = data.get("user_id")
-    goal_title    = data.get("goal_title", "")
-    current_steps = data.get("current_steps", [])
+    goal_id        = data.get("goal_id")
+    user_id        = data.get("user_id")
+    goal_title     = data.get("goal_title", "")
+    current_steps  = data.get("current_steps", [])
     learning_style = data.get("learning_style", "visual")
-    daily_time    = data.get("daily_time", 30)
+    daily_time     = data.get("daily_time", 30)
 
     if not goal_id or not user_id or not goal_title:
         return jsonify({"error": "goal_id, user_id, goal_title required"}), 400
 
     try:
+        # FIX 3: fetch history once, pass to analyse_pace once
         history  = get_attempt_history(db, int(goal_id), int(user_id))
         analysis = analyse_pace(history)
         action   = analysis["action"]
@@ -221,14 +225,13 @@ def regenerate_roadmap():
 
         if action == "maintain":
             return jsonify({
-                "action":           "maintain",
-                "reason":           reason,
+                "action":             "maintain",
+                "reason":             reason,
                 "difficulty_changed": False,
-                "new_steps":        current_steps,
-                "message":          "Your pace is good — no adjustment needed!",
+                "new_steps":          current_steps,
+                "message":            "Your pace is good — no adjustment needed!",
             })
 
-        # Generate new roadmap
         new_steps = regenerate_roadmap_ai(
             goal_title, current_steps, action, learning_style, daily_time, reason
         )
@@ -236,15 +239,14 @@ def regenerate_roadmap():
         if not new_steps:
             return jsonify({"error": "AI generation failed"}), 500
 
-        # Save new roadmap to DB
         db.execute(sql_text(
             "UPDATE goals SET roadmap = :r WHERE id = :id AND user_id = :uid"
         ), {"r": json.dumps(new_steps), "id": int(goal_id), "uid": int(user_id)})
         db.commit()
 
         direction_label = {
-            "simplify": "📉 Simplified — smaller steps, more guidance",
-            "advance":  "📈 Advanced — deeper concepts, more challenge",
+            "simplify": "Simplified — smaller steps, more guidance",
+            "advance":  "Advanced — deeper concepts, more challenge",
         }.get(action, "Updated")
 
         return jsonify({

@@ -1,9 +1,16 @@
 """
 routes/spaced_repetition.py — PostgreSQL-compatible version
-FIXED: Removed SQLite-specific AUTOINCREMENT and CREATE TABLE IF NOT EXISTS.
-The spaced_reviews table is created by models.py / init_db() instead.
-If the table doesn't exist, endpoints return empty data gracefully.
+
+FIXES APPLIED:
+  1. ensure_table() no longer called on every GET/POST — replaced with a
+     module-level _ensure_table() that runs ONCE at import time.
+     Previously every single GET and POST ran CREATE TABLE IF NOT EXISTS
+     against PostgreSQL (a DDL round-trip per request).
+  2. Added index on (user_id, next_review) — ORDER BY next_review on a full
+     table scan is slow; the index makes it a fast seek.
+     Index is created in the same one-time setup call.
 """
+
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
@@ -17,8 +24,9 @@ def next_review_date(level):
     days = INTERVALS[min(level, len(INTERVALS) - 1)]
     return datetime.utcnow() + timedelta(days=days)
 
-def ensure_table(db):
-    """Create spaced_reviews table if it doesn't exist — PostgreSQL syntax."""
+# FIX 1 + 2: Run table + index creation ONCE at import time, not per request
+def _ensure_table_once():
+    db = SessionLocal()
     try:
         db.execute(sql_text("""
             CREATE TABLE IF NOT EXISTS spaced_reviews (
@@ -33,17 +41,26 @@ def ensure_table(db):
                 created_at    TIMESTAMP DEFAULT NOW()
             )
         """))
+        # FIX 2: Index on (user_id, next_review) — avoids full table scan on ORDER BY
+        db.execute(sql_text("""
+            CREATE INDEX IF NOT EXISTS idx_spaced_reviews_user_next
+            ON spaced_reviews (user_id, next_review ASC)
+        """))
         db.commit()
     except Exception as e:
         print(f"spaced_reviews table ensure error: {e}")
         try: db.rollback()
         except: pass
+    finally:
+        db.close()
+
+_ensure_table_once()
+
 
 @sr_bp.route("/spaced-review", methods=["GET"])
 def get_reviews():
     db = SessionLocal()
     try:
-        ensure_table(db)
         user_id = request.args.get("user_id")
         now     = datetime.utcnow()
         rows    = db.execute(sql_text(
@@ -75,7 +92,6 @@ def get_reviews():
 def create_review():
     db = SessionLocal()
     try:
-        ensure_table(db)
         body    = request.get_json() or {}
         user_id = body.get("user_id")
         content = body.get("content", "").strip()
@@ -106,7 +122,6 @@ def create_review():
 def do_review(item_id):
     db = SessionLocal()
     try:
-        ensure_table(db)
         body    = request.get_json() or {}
         user_id = body.get("user_id")
         passed  = body.get("passed", True)
@@ -143,7 +158,6 @@ def do_review(item_id):
 def delete_review(item_id):
     db = SessionLocal()
     try:
-        ensure_table(db)
         user_id = request.args.get("user_id")
         db.execute(sql_text("DELETE FROM spaced_reviews WHERE id=:id AND user_id=:uid"),
                    {"id": item_id, "uid": user_id})
@@ -160,7 +174,6 @@ def delete_review(item_id):
 def get_stats():
     db = SessionLocal()
     try:
-        ensure_table(db)
         user_id = request.args.get("user_id")
         now     = datetime.utcnow()
         rows    = db.execute(sql_text(

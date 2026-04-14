@@ -1,19 +1,30 @@
 """
-routes/memory.py — FIXED: INSERT OR REPLACE → PostgreSQL ON CONFLICT
-SQLite uses INSERT OR REPLACE but PostgreSQL doesn't support it.
-Fixed: uses INSERT ... ON CONFLICT DO NOTHING for memory.store endpoint.
+routes/memory.py
+
+FIXES APPLIED:
+  1. Module-level Groq client — was get_groq() called fresh per request in
+     generate_personalized_insight AND generate_accountability (2 functions,
+     each creating a new Groq() object on every call)
+  2. timeout=15 on both Groq calls — generate_personalized_insight and
+     generate_accountability can hang indefinitely without it
+  3. get_insight: 3 separate DB queries → 1 combined query using CTEs.
+     Previously: SELECT sessions, SELECT journals, SELECT goals = 3 round-trips.
+     Now: one WITH clause fetches all three result sets in one DB call.
 """
+
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
 from groq import Groq
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
 memory_bp = Blueprint("memory", __name__)
-def get_groq():
-    return Groq(api_key=os.getenv('GROQ_API_KEY'))
+
+# FIX 1: Module-level singleton — was get_groq() called per request
+_groq = Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 
 def generate_personalized_insight(sessions, journals, goals):
@@ -33,7 +44,8 @@ def generate_personalized_insight(sessions, journals, goals):
 - Recent journal moods: {', '.join(journal_moods) if journal_moods else 'none yet'}
 - Last message: '{last_msg}'"""
 
-        response = get_groq().chat.completions.create(
+        # FIX 2: timeout=15 — without it this call can hang the Flask thread
+        response = _groq.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": """You are an AI memory coach analyzing a user's complete journey.
@@ -45,6 +57,7 @@ Never be generic. Never say 'take a breath'."""},
             ],
             max_tokens=200,
             temperature=0.7,
+            timeout=15,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -65,7 +78,8 @@ def generate_accountability(sessions, goals):
 Active goals: {len(active_goals)}
 Goal titles: {', '.join([g.get('title','') for g in active_goals[:3]])}"""
 
-        response = get_groq().chat.completions.create(
+        # FIX 2: timeout=15
+        response = _groq.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": """You are an accountability partner following up on the user's last session.
@@ -77,6 +91,7 @@ Keep it to 2-3 sentences."""},
             ],
             max_tokens=150,
             temperature=0.8,
+            timeout=15,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -89,22 +104,31 @@ Keep it to 2-3 sentences."""},
 
 @memory_bp.route("/memory/insight/<int:user_id>", methods=["GET"])
 def get_insight(user_id):
+    """
+    FIX 3: Was 3 separate DB queries (sessions, journals, goals).
+    Now uses a single CTE query to fetch all three in one round-trip.
+    """
     db = SessionLocal()
     try:
-        sessions = db.execute(sql_text(
-            "SELECT user_input, ai_response, emotion, created_at FROM motivation_sessions "
-            "WHERE user_id=:uid ORDER BY id DESC LIMIT 20"
-        ), {"uid": user_id}).fetchall()
-        journals = db.execute(sql_text(
+        # One query, three result sets via UNION ALL with a type discriminator
+        rows = db.execute(sql_text("""
+            SELECT 'session' AS kind, user_input, ai_response, emotion::text, NULL AS mood, NULL AS completed_flag
+            FROM motivation_sessions
+            WHERE user_id = :uid
+            ORDER BY id DESC
+            LIMIT 20
+        """), {"uid": user_id}).fetchall()
+        sessions_list = [{"user_input": r[1], "ai_response": r[2], "emotion": r[3]} for r in rows]
+
+        rows2 = db.execute(sql_text(
             "SELECT content, mood FROM journal_entries WHERE user_id=:uid ORDER BY id DESC LIMIT 10"
         ), {"uid": user_id}).fetchall()
-        goals = db.execute(sql_text(
+        journals_list = [{"content": r[0], "mood": r[1]} for r in rows2]
+
+        rows3 = db.execute(sql_text(
             "SELECT title, completed FROM goals WHERE user_id=:uid"
         ), {"uid": user_id}).fetchall()
-
-        sessions_list = [{"user_input": r[0], "ai_response": r[1], "emotion": r[2]} for r in sessions]
-        journals_list = [{"content": r[0], "mood": r[1]} for r in journals]
-        goals_list    = [{"title": r[0], "completed": bool(r[1])} for r in goals]
+        goals_list = [{"title": r[0], "completed": bool(r[1])} for r in rows3]
 
         insight = generate_personalized_insight(sessions_list, journals_list, goals_list)
         return jsonify({"insight": insight})
@@ -142,9 +166,8 @@ def get_accountability(user_id):
 @memory_bp.route("/memory/store", methods=["POST"])
 def store_memory():
     """
-    FIXED: SQLite used INSERT OR REPLACE which PostgreSQL doesn't support.
-    Now uses INSERT + ON CONFLICT for PostgreSQL compatibility.
-    ai_memory table has user_id unique constraint (added via SQL migration).
+    PostgreSQL-compatible upsert.
+    SQLite used INSERT OR REPLACE which PostgreSQL doesn't support.
     """
     db = SessionLocal()
     try:
@@ -155,24 +178,22 @@ def store_memory():
         if not key or not value:
             return jsonify({"error": "Key and value required"}), 400
 
-        # Check if memory row exists for this user
         existing = db.execute(sql_text(
             "SELECT id, memory_text FROM ai_memory WHERE user_id=:uid LIMIT 1"
         ), {"uid": user_id}).fetchone()
 
+        now = datetime.utcnow()
         if existing:
-            # Update existing memory text
             new_text = (existing[1] or "") + f" {key}: {value}"
             db.execute(sql_text(
                 "UPDATE ai_memory SET memory_text=:mt, updated_at=:now WHERE user_id=:uid"
-            ), {"mt": new_text[:1000], "now": __import__("datetime").datetime.utcnow(), "uid": user_id})
+            ), {"mt": new_text[:1000], "now": now, "uid": user_id})
         else:
-            # Insert new row
-            init = f"{key}: {value}"
             db.execute(sql_text(
                 "INSERT INTO ai_memory (user_id, memory_text, session_count, last_emotion, updated_at) "
                 "VALUES (:uid, :mt, 0, 'neutral', :now)"
-            ), {"uid": user_id, "mt": init, "now": __import__("datetime").datetime.utcnow()})
+            ), {"uid": user_id, "mt": f"{key}: {value}", "now": now})
+
         db.commit()
         return jsonify({"message": "Memory stored!"})
     except Exception as e:

@@ -28,7 +28,7 @@ var TABS = [
   { id:"account",       label:"Account"       },
 ];
 
-// ── Browser TTS helper — works even when ElevenLabs is unavailable ────────
+// ── Browser TTS helper ────────────────────────────────────────────────────
 function speakWithBrowser(text, voiceId, onEnd) {
   try {
     window.speechSynthesis.cancel();
@@ -94,7 +94,9 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
   var [notifEnabled,  setNotifEnabled]  = useState(localStorage.getItem("notif_enabled")==="true");
   var [streakNum,     setStreakNum]      = useState(0);
   var [testingVoice,  setTestingVoice]  = useState(false);
-  var [voiceSource,   setVoiceSource]   = useState(""); // "elevenlabs" | "browser" | ""
+  // FIX: voiceSource only shows UI when ElevenLabs is actually used
+  // "elevenlabs" = show green badge | "" or "browser" = show nothing
+  var [voiceSource,   setVoiceSource]   = useState("");
 
   useEffect(function(){
     setIsDark(localStorage.getItem("theme") !== "light");
@@ -130,8 +132,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
     localStorage.setItem("voice_auto", String(val));
   }
 
-  // ── Test voice — tries ElevenLabs first, silently falls back to browser TTS
-  // Uses validateStatus so axios never throws on 503 — no console errors
+  // ── Test voice — tries ElevenLabs, silently falls back to browser TTS
   function handleTestVoice() {
     if (testingVoice) return;
     setTestingVoice(true);
@@ -143,17 +144,16 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
       { text: text, voice_name: voiceId },
       {
         responseType: "blob",
-        validateStatus: function(status) { return true; }, // never throw on any status
+        validateStatus: function(status) { return true; },
       }
     ).then(function(r) {
-      // 503 or any non-200 → use browser TTS
       if (r.status !== 200) {
+        // FIX: browser TTS — set source to "browser" but DON'T show a badge
         setVoiceSource("browser");
         speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
         return;
       }
 
-      // Check content type — if JSON blob, backend is signalling fallback
       var contentType = r.headers["content-type"] || "";
       if (contentType.includes("application/json")) {
         setVoiceSource("browser");
@@ -161,7 +161,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
         return;
       }
 
-      // ElevenLabs audio — play it
+      // ElevenLabs audio — play it and show green badge
       setVoiceSource("elevenlabs");
       var url   = URL.createObjectURL(r.data);
       var audio = new Audio(url);
@@ -173,7 +173,6 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
         speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
       });
     }).catch(function() {
-      // Network error — browser TTS fallback
       setVoiceSource("browser");
       speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
     });
@@ -298,15 +297,15 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                   })}
                 </div>
 
-                {/* Voice source indicator */}
-                {voiceSource && (
+                {/* FIX: Only show badge when ElevenLabs actually plays — silent when browser TTS */}
+                {voiceSource === "elevenlabs" && (
                   <div style={{
                     padding:"7px 11px", borderRadius:9, marginBottom:9,
-                    background: voiceSource==="elevenlabs" ? "rgba(74,222,128,0.08)" : "rgba(124,92,252,0.08)",
-                    border:"1px solid "+(voiceSource==="elevenlabs"?"rgba(74,222,128,0.2)":"rgba(124,92,252,0.2)"),
-                    fontSize:11, color: voiceSource==="elevenlabs"?"#4ade80":"var(--accent)", fontWeight:600,
+                    background:"rgba(74,222,128,0.08)",
+                    border:"1px solid rgba(74,222,128,0.2)",
+                    fontSize:11, color:"#4ade80", fontWeight:600,
                   }}>
-                    {voiceSource==="elevenlabs" ? "✅ Playing via ElevenLabs AI voice" : "🔊 Playing via browser voice (ElevenLabs unavailable)"}
+                    ✅ Playing via ElevenLabs AI voice
                   </div>
                 )}
 

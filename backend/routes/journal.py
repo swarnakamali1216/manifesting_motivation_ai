@@ -1,3 +1,10 @@
+"""
+routes/journal.py — FIXED VERSION
+Changes from original:
+  1. Module-level _groq singleton — no new Groq() per request
+  2. timeout=15 on all completions.create calls
+  3. Added title and tags columns to INSERT (were missing from original)
+"""
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
@@ -7,8 +14,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 journal_bp = Blueprint("journal", __name__)
-def get_groq():
-    return Groq(api_key=os.getenv('GROQ_API_KEY'))
+
+# FIX 1: module-level singleton — created once, reused every request
+_groq = Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 
 # ── GET /journal ─────────────────────────────────────────────
@@ -21,21 +29,41 @@ def get_journal():
     try:
         db = SessionLocal()
         rows = db.execute(sql_text(
-            "SELECT id, user_id, content, mood, mood_score, ai_insight, created_at "
+            "SELECT id, user_id, title, content, mood, mood_score, tags, ai_insight, created_at "
             "FROM journal_entries WHERE user_id=:uid ORDER BY created_at DESC"
         ), {"uid": user_id}).fetchall()
         return jsonify([{
             "id":         r[0],
             "user_id":    r[1],
-            "content":    r[2],
-            "mood":       r[3],
-            "mood_score": r[4],
-            "ai_insight": r[5],
-            "created_at": str(r[6]),
+            "title":      r[2],
+            "content":    r[3],
+            "mood":       r[4],
+            "mood_score": r[5],
+            "tags":       r[6],
+            "ai_insight": r[7],
+            "created_at": str(r[8]),
         } for r in rows])
     except Exception as e:
         print(f"[journal GET] {e}")
-        return jsonify([])
+        # Fallback — try without title/tags columns if they don't exist yet
+        try:
+            rows2 = db.execute(sql_text(
+                "SELECT id, user_id, content, mood, mood_score, ai_insight, created_at "
+                "FROM journal_entries WHERE user_id=:uid ORDER BY created_at DESC"
+            ), {"uid": user_id}).fetchall()
+            return jsonify([{
+                "id":         r[0],
+                "user_id":    r[1],
+                "title":      None,
+                "content":    r[2],
+                "mood":       r[3],
+                "mood_score": r[4],
+                "tags":       None,
+                "ai_insight": r[5],
+                "created_at": str(r[6]),
+            } for r in rows2])
+        except Exception:
+            return jsonify([])
     finally:
         if db: db.close()
 
@@ -47,6 +75,8 @@ def add_journal():
     user_id = data.get("user_id")
     content = (data.get("content") or "").strip()
     mood    = data.get("mood", "okay")
+    title   = data.get("title", "")
+    tags    = data.get("tags", "")
 
     if not user_id or not content:
         return jsonify({"error": "user_id and content required"}), 400
@@ -64,10 +94,10 @@ def add_journal():
         except Exception:
             pass
 
-        # AI insight
+        # FIX 2: AI insight using _groq + timeout=15
         ai_insight = None
         try:
-            resp = get_groq().chat.completions.create(
+            resp = _groq.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content":
                     f"A student wrote this journal entry (mood: {mood}):\n\"{content[:400]}\"\n\n"
@@ -75,17 +105,27 @@ def add_journal():
                     "Acknowledge what they wrote specifically, then offer one encouraging observation."}],
                 max_tokens=100,
                 temperature=0.75,
+                timeout=15,
             )
             ai_insight = resp.choices[0].message.content.strip()
         except Exception as e:
             print(f"[journal AI insight] {e}")
 
-        row = db.execute(sql_text(
-            
-            "INSERT INTO journal_entries (user_id, content, mood, mood_score, ai_insight, created_at) "
-            "VALUES (:uid, :content, :mood, :score, :insight, NOW()) RETURNING id"
-        ), {"uid": user_id, "content": content, "mood": mood,
-            "score": mood_score, "insight": ai_insight}).fetchone()
+        # Try insert with title + tags; fallback without if columns missing
+        try:
+            row = db.execute(sql_text(
+                "INSERT INTO journal_entries (user_id, title, content, mood, mood_score, tags, ai_insight, created_at) "
+                "VALUES (:uid, :title, :content, :mood, :score, :tags, :insight, NOW()) RETURNING id"
+            ), {"uid": user_id, "title": title, "content": content, "mood": mood,
+                "score": mood_score, "tags": tags, "insight": ai_insight}).fetchone()
+        except Exception:
+            db.rollback()
+            row = db.execute(sql_text(
+                "INSERT INTO journal_entries (user_id, content, mood, mood_score, ai_insight, created_at) "
+                "VALUES (:uid, :content, :mood, :score, :insight, NOW()) RETURNING id"
+            ), {"uid": user_id, "content": content, "mood": mood,
+                "score": mood_score, "insight": ai_insight}).fetchone()
+
         db.commit()
 
         # Award XP
@@ -124,14 +164,22 @@ def update_journal(entry_id):
     data    = request.get_json() or {}
     content = (data.get("content") or "").strip()
     mood    = data.get("mood", "okay")
+    title   = data.get("title", "")
+    tags    = data.get("tags", "")
     if not content:
         return jsonify({"error": "content required"}), 400
     db = None
     try:
         db = SessionLocal()
-        db.execute(sql_text(
-            "UPDATE journal_entries SET content=:c, mood=:m WHERE id=:id"
-        ), {"c": content, "m": mood, "id": entry_id})
+        try:
+            db.execute(sql_text(
+                "UPDATE journal_entries SET content=:c, mood=:m, title=:t, tags=:tags WHERE id=:id"
+            ), {"c": content, "m": mood, "t": title, "tags": tags, "id": entry_id})
+        except Exception:
+            db.rollback()
+            db.execute(sql_text(
+                "UPDATE journal_entries SET content=:c, mood=:m WHERE id=:id"
+            ), {"c": content, "m": mood, "id": entry_id})
         db.commit()
         return jsonify({"message": "Updated!"})
     except Exception as e:
@@ -160,11 +208,6 @@ def delete_journal(entry_id):
 # ── GET /journal/weekly-recap ────────────────────────────────
 @journal_bp.route("/journal/weekly-recap", methods=["GET"])
 def weekly_recap():
-    """
-    GET /api/journal/weekly-recap?user_id=2
-    Returns AI-generated weekly recap from last 7 journal entries.
-    Fixes the 404 error on Journal page Weekly Recap tab.
-    """
     user_id = request.args.get("user_id", type=int)
     if not user_id:
         return jsonify({"error": "user_id required"}), 400
@@ -199,20 +242,19 @@ def weekly_recap():
         positive   = sum(1 for s in scores if s > 0.1)
         tough      = sum(1 for s in scores if s < -0.1)
 
-        # Build context for AI
         entries_text = "\n".join([
-            f"- [{r[3].strftime('%a %b %d') if r[3] else '?'}] Mood: {r[1]} | {(r[0] or '')[:100]}"
+            f"- [{r[3].strftime('%a %b %d') if hasattr(r[3], 'strftime') else str(r[3])[:10]}] Mood: {r[1]} | {(r[0] or '')[:100]}"
             for r in rows
         ])
 
-        # AI recap
+        # FIX 2: use _groq + timeout=15
         recap_text = (
             f"You wrote {len(rows)} journal entries this week "
             f"with an average mood of {avg_mood}. "
             f"Keep reflecting — every entry builds self-awareness."
         )
         try:
-            resp = get_groq().chat.completions.create(
+            resp = _groq.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content":
                     f"You are a warm AI coach reviewing a student's journal entries from the past week.\n\n"
@@ -224,6 +266,7 @@ def weekly_recap():
                     "Keep it warm, personal, under 75 words."}],
                 max_tokens=120,
                 temperature=0.7,
+                timeout=15,
             )
             recap_text = resp.choices[0].message.content.strip()
         except Exception as e:

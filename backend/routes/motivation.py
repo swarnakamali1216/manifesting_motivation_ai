@@ -1,22 +1,25 @@
 ﻿"""
-routes/motivation.py
-EXPANDED TOPIC DETECTION — detects all question types:
-  weather, news, datetime, career, academic, health, fitness,
-  habits, finance, productivity, facts, motivation, emotional support
+routes/motivation.py  — FIXED VERSION
+Changes from original:
+  1. Module-level _groq singleton — no new Groq() per request
+  2. timeout=15 on every completions.create call
+  3. daily_quote also uses _groq + timeout
 """
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
 from groq import Groq
 import os, sys, re, requests
-from datetime import datetime, date, timedelta
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sentiment import detect_emotion, get_emotion_prompt
 
 motivation_bp = Blueprint("motivation", __name__)
-def get_groq():
-    return Groq(api_key=os.environ.get('GROQ_API_KEY', ''))
+
+# FIX 1: module-level singleton — created once, reused on every request
+_groq = Groq(api_key=os.environ.get('GROQ_API_KEY', ''))
+
 SELF_URL = os.environ.get("SELF_URL", "https://manifesting-motivation-backend.onrender.com/api")
 
 def safe_str(val):
@@ -52,7 +55,7 @@ CRISIS_RESPONSE = {
         "If you're in immediate danger, please call 112. You are not alone in this. 💙"
     ),
     "emotion": "crisis",
-    "resources": {"india_icall":"9152987821","india_vandrevala":"1860-2662-345","emergency":"112"}
+    "resources": {"india_icall": "9152987821", "india_vandrevala": "1860-2662-345", "emergency": "112"}
 }
 
 def check_content_safety(text):
@@ -172,21 +175,21 @@ CORE RULES:
 """
 
 TOPIC_SYSTEM = {
-    "weather": BASE_RULES + "\nMODE: WEATHER\nIf [LIVE WEATHER DATA] is provided, use exact numbers. Give temperature, condition, comfort tip. If no live data: say you can't access live weather.",
-    "news": BASE_RULES + "\nMODE: NEWS\nIf [LIVE NEWS HEADLINES] are provided, present them naturally. If no live data: direct to timesofindia.com, ndtv.com. NEVER invent headlines.",
-    "datetime": BASE_RULES + "\nMODE: DATE AND TIME\nThe [SYSTEM CONTEXT] block has EXACT current date, day and time from user device. Extract it and answer directly. Never guess.",
-    "capability": BASE_RULES + "\nMODE: ABOUT THIS AI\nYou are Manifesting Motivation AI Coach, powered by LLaMA 3.3 70B via Groq. You can: emotional coaching, goal roadmaps, habit advice, career guidance, study help, fitness plans. Be honest and warm.",
-    "career": BASE_RULES + "\nMODE: CAREER COACH\nGive specific actionable advice. Resume tips, interview prep, LinkedIn. For roadmaps: name actual tools, platforms, certifications. 80-150 words. End with encouragement.",
-    "academic": BASE_RULES + "\nMODE: ACADEMIC MENTOR\nExplain concepts clearly with examples. For study plans: Pomodoro, spaced repetition, active recall. For project ideas: give 2-3 specific ideas with tech stack. 80-150 words.",
-    "health": BASE_RULES + "\nMODE: HEALTH COACH (NOT A DOCTOR)\nGive practical wellness advice. ALWAYS end with: 'I'm a coach, not a doctor. If symptoms persist, please see a qualified doctor.' NEVER diagnose. NEVER prescribe.",
-    "fitness": BASE_RULES + "\nMODE: FITNESS COACH\nGive specific workout advice: exercise names, sets, reps, rest time. Always include warm-up reminder. 80-150 words. Encouraging.",
-    "mental": BASE_RULES + "\nMODE: MENTAL WELLNESS (NOT A THERAPIST)\nLead with genuine empathy. Give one practical technique. For serious concerns: recommend iCall (9152987821). NEVER diagnose. 2-4 warm sentences.",
-    "habits": BASE_RULES + "\nMODE: HABITS COACH\nDraw on habit science: habit stacking, 2-minute rule. For procrastination: 5-second rule, body doubling. Specific and actionable. 80-150 words.",
-    "finance": BASE_RULES + "\nMODE: FINANCIAL WELLNESS (NOT A FINANCIAL ADVISOR)\nGeneral personal finance: budgeting, saving, emergency funds. For Indian users: mention SIP, PPF, NPS. NEVER recommend specific stocks. Say you're a coach not an advisor.",
-    "motivation": BASE_RULES + "\nMODE: MOTIVATIONAL COACH\nAcknowledge their struggle specifically. Share one truth that makes them feel less alone. Then give ONE practical next step — smallest possible action. 2-4 sentences.",
-    "food": BASE_RULES + "\nMODE: NUTRITION COACH\nPractical meal planning. For Indian context: dal, rice, roti, vegetables. Specific and achievable. 80-150 words.",
+    "weather":      BASE_RULES + "\nMODE: WEATHER\nIf [LIVE WEATHER DATA] is provided, use exact numbers. Give temperature, condition, comfort tip. If no live data: say you can't access live weather.",
+    "news":         BASE_RULES + "\nMODE: NEWS\nIf [LIVE NEWS HEADLINES] are provided, present them naturally. If no live data: direct to timesofindia.com, ndtv.com. NEVER invent headlines.",
+    "datetime":     BASE_RULES + "\nMODE: DATE AND TIME\nThe [SYSTEM CONTEXT] block has EXACT current date, day and time from user device. Extract it and answer directly. Never guess.",
+    "capability":   BASE_RULES + "\nMODE: ABOUT THIS AI\nYou are Manifesting Motivation AI Coach, powered by LLaMA 3.3 70B via Groq. You can: emotional coaching, goal roadmaps, habit advice, career guidance, study help, fitness plans. Be honest and warm.",
+    "career":       BASE_RULES + "\nMODE: CAREER COACH\nGive specific actionable advice. Resume tips, interview prep, LinkedIn. For roadmaps: name actual tools, platforms, certifications. 80-150 words. End with encouragement.",
+    "academic":     BASE_RULES + "\nMODE: ACADEMIC MENTOR\nExplain concepts clearly with examples. For study plans: Pomodoro, spaced repetition, active recall. For project ideas: give 2-3 specific ideas with tech stack. 80-150 words.",
+    "health":       BASE_RULES + "\nMODE: HEALTH COACH (NOT A DOCTOR)\nGive practical wellness advice. ALWAYS end with: 'I'm a coach, not a doctor. If symptoms persist, please see a qualified doctor.' NEVER diagnose. NEVER prescribe.",
+    "fitness":      BASE_RULES + "\nMODE: FITNESS COACH\nGive specific workout advice: exercise names, sets, reps, rest time. Always include warm-up reminder. 80-150 words. Encouraging.",
+    "mental":       BASE_RULES + "\nMODE: MENTAL WELLNESS (NOT A THERAPIST)\nLead with genuine empathy. Give one practical technique. For serious concerns: recommend iCall (9152987821). NEVER diagnose. 2-4 warm sentences.",
+    "habits":       BASE_RULES + "\nMODE: HABITS COACH\nDraw on habit science: habit stacking, 2-minute rule. For procrastination: 5-second rule, body doubling. Specific and actionable. 80-150 words.",
+    "finance":      BASE_RULES + "\nMODE: FINANCIAL WELLNESS (NOT A FINANCIAL ADVISOR)\nGeneral personal finance: budgeting, saving, emergency funds. For Indian users: mention SIP, PPF, NPS. NEVER recommend specific stocks. Say you're a coach not an advisor.",
+    "motivation":   BASE_RULES + "\nMODE: MOTIVATIONAL COACH\nAcknowledge their struggle specifically. Share one truth that makes them feel less alone. Then give ONE practical next step — smallest possible action. 2-4 sentences.",
+    "food":         BASE_RULES + "\nMODE: NUTRITION COACH\nPractical meal planning. For Indian context: dal, rice, roti, vegetables. Specific and achievable. 80-150 words.",
     "relationship": BASE_RULES + "\nMODE: RELATIONSHIP SUPPORT\nLead with empathy. NEVER take sides. 2-4 warm sentences.",
-    "creativity": BASE_RULES + "\nMODE: CREATIVITY COACH\nEncourage and inspire. Specific techniques for creative blocks. Warm, enthusiastic. 80-150 words.",
+    "creativity":   BASE_RULES + "\nMODE: CREATIVITY COACH\nEncourage and inspire. Specific techniques for creative blocks. Warm, enthusiastic. 80-150 words.",
 }
 
 EMOTIONAL_SYSTEM = BASE_RULES + """
@@ -273,13 +276,13 @@ def motivate():
         # Crisis check
         is_crisis, is_soft_distress, _ = check_content_safety(message)
         if is_crisis:
-            print(f"🚨 CRISIS for user {user_id}: {message[:60]}")
+            print(f"CRISIS for user {user_id}: {message[:60]}")
             if user_id:
                 try:
                     db.execute(sql_text(
                         "INSERT INTO motivation_sessions (user_id, user_input, ai_response, emotion, created_at) "
                         "VALUES (:uid, :msg, :resp, 'crisis', NOW())"
-                    ), {"uid":int(user_id), "msg":message, "resp":"[CRISIS — helplines shown]"})
+                    ), {"uid": int(user_id), "msg": message, "resp": "[CRISIS — helplines shown]"})
                     db.commit()
                 except Exception:
                     try: db.rollback()
@@ -308,7 +311,7 @@ def motivate():
         user_wants_answer = any(re.search(p, msg_lower) for p in REQUEST_PATTERNS)
         ends_with_q       = msg_lower.rstrip().endswith("?")
         topic             = detect_topic(message)
-        is_emotional      = emotion in ("sad","stressed","anxious","frustrated","negative") and not user_wants_answer and not ends_with_q
+        is_emotional      = emotion in ("sad", "stressed", "anxious", "frustrated", "negative") and not user_wants_answer and not ends_with_q
         answer_mode       = (user_wants_answer or ends_with_q or is_followup) and not is_emotional
 
         # Fetch live data
@@ -323,7 +326,7 @@ def motivate():
         # Build system prompt
         if topic and topic in TOPIC_SYSTEM:
             system_msg = real_date_context + live_data + "\n\n" + TOPIC_SYSTEM[topic]
-        elif is_emotional or emotion in ("sad","stressed","anxious","frustrated","negative"):
+        elif is_emotional or emotion in ("sad", "stressed", "anxious", "frustrated", "negative"):
             system_msg = real_date_context + "\n\n" + EMOTIONAL_SYSTEM
         elif answer_mode:
             system_msg = real_date_context + "\n\n" + ANSWER_SYSTEM
@@ -331,22 +334,22 @@ def motivate():
             suffix = PERSONA_SUFFIX.get(persona, PERSONA_SUFFIX["general"])
             system_msg = real_date_context + "\n\n" + BASE_RULES + f"\nYOUR PERSONA: {suffix}"
 
-        conv_messages = [{"role":"system","content":system_msg}]
+        conv_messages = [{"role": "system", "content": system_msg}]
         if conversation_history:
             for line in conversation_history.strip().split("\n"):
                 line = line.strip()
                 if line.startswith("user:"):
-                    conv_messages.append({"role":"user","content":line[5:].strip()})
+                    conv_messages.append({"role": "user", "content": line[5:].strip()})
                 elif line.startswith("bot:"):
-                    conv_messages.append({"role":"assistant","content":line[4:].strip()})
+                    conv_messages.append({"role": "assistant", "content": line[4:].strip()})
 
         emotion_tip  = EMOTION_INSTRUCTIONS.get(emotion, "Meet them where they are.")
         conv_summary = ""
         if conversation_history and is_followup:
             recent = [l.strip() for l in conversation_history.strip().split("\n") if l.strip()][-6:]
-            conv_summary = "\nRECENT CONVERSATION:\n"+"\n".join(recent)+"\n\nUser confirmed — deliver what was discussed."
+            conv_summary = "\nRECENT CONVERSATION:\n" + "\n".join(recent) + "\n\nUser confirmed — deliver what was discussed."
 
-        if topic in ("weather","news","datetime","capability"):
+        if topic in ("weather", "news", "datetime", "capability"):
             user_prompt = (
                 f"{real_date_context}\n{live_data}\n\n"
                 f"User asked: \"{message}\"\n\n"
@@ -371,16 +374,17 @@ def motivate():
                 f"Respond warmly. 2-4 sentences."
             )
 
-        conv_messages.append({"role":"user","content":user_prompt})
+        conv_messages.append({"role": "user", "content": user_prompt})
 
-        # Groq call
-        rt = topic in ("weather","news","datetime","capability")
+        # FIX 2: Use module-level _groq + timeout=15
+        rt = topic in ("weather", "news", "datetime", "capability")
         max_tok = 100 if rt else (180 if answer_mode else 100)
-        resp = get_groq().chat.completions.create(
+        resp = _groq.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=conv_messages,
             max_tokens=max_tok,
             temperature=0.75,
+            timeout=15,
         )
         reply = resp.choices[0].message.content.strip()
 
@@ -398,9 +402,9 @@ def motivate():
         if len(words) > word_limit:
             trunc    = " ".join(words[:word_limit])
             last_end = max(trunc.rfind("."), trunc.rfind("?"), trunc.rfind("!"))
-            if last_end > 20: reply = trunc[:last_end+1]
+            if last_end > 20: reply = trunc[:last_end + 1]
 
-        # ── Save session + XP + streak ────────────────────────────────────────
+        # Save session + XP + streak
         xp_awarded = 0; streak_count = 0; sessions_count = 0
         if user_id and message:
             try:
@@ -408,8 +412,8 @@ def motivate():
                     "INSERT INTO motivation_sessions "
                     "(user_id, user_input, ai_response, emotion, vader_score, created_at) "
                     "VALUES (:uid, :msg, :resp, :emo, :vs, NOW())"
-                ), {"uid":int(user_id),"msg":message[:1000],"resp":reply[:2000],
-                    "emo":emotion,"vs":float(vader_score) if vader_score is not None else 0.0})
+                ), {"uid": int(user_id), "msg": message[:1000], "resp": reply[:2000],
+                    "emo": emotion, "vs": float(vader_score) if vader_score is not None else 0.0})
                 db.commit()
             except Exception:
                 try: db.rollback()
@@ -418,7 +422,7 @@ def motivate():
                     db.execute(sql_text(
                         "INSERT INTO motivation_sessions (user_id, user_input, ai_response, emotion, created_at) "
                         "VALUES (:uid, :msg, :resp, :emo, NOW())"
-                    ), {"uid":int(user_id),"msg":message[:1000],"resp":reply[:2000],"emo":emotion})
+                    ), {"uid": int(user_id), "msg": message[:1000], "resp": reply[:2000], "emo": emotion})
                     db.commit()
                 except Exception: pass
 
@@ -426,13 +430,13 @@ def motivate():
             try:
                 xp_awarded = 10
                 db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+:xp WHERE id=:uid"),
-                           {"xp":xp_awarded,"uid":int(user_id)})
+                           {"xp": xp_awarded, "uid": int(user_id)})
                 db.commit()
             except Exception:
                 try: db.rollback()
                 except: pass
 
-            # Update streak via shared utility
+            # Update streak
             try:
                 from streak_utils import update_user_streak
                 streak_count, _ = update_user_streak(db, int(user_id))
@@ -441,7 +445,7 @@ def motivate():
 
             try:
                 row = db.execute(sql_text("SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid"),
-                                 {"uid":int(user_id)}).fetchone()
+                                 {"uid": int(user_id)}).fetchone()
                 sessions_count = row[0] if row else 0
             except Exception: pass
 
@@ -476,20 +480,21 @@ def motivate():
 @motivation_bp.route("/motivate/analyse", methods=["POST"])
 def analyse_emotion():
     data   = request.get_json() or {}
-    result = detect_emotion(data.get("text",""))
+    result = detect_emotion(data.get("text", ""))
     result["emotion_config"] = get_emotion_prompt(result["emotion"])
     return jsonify(result)
 
 
 @motivation_bp.route("/motivate/quote", methods=["GET"])
 def daily_quote():
+    # FIX: use _groq singleton + timeout=15
     try:
-        resp = get_groq().chat.completions.create(
+        resp = _groq.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role":"user","content":"One powerful motivational quote under 20 words. Just the quote, no author, no quote marks."}],
+            messages=[{"role": "user", "content": "One powerful motivational quote under 20 words. Just the quote, no author, no quote marks."}],
             max_tokens=40,
+            timeout=15,
         )
         return jsonify({"quote": resp.choices[0].message.content.strip().strip('"').strip("'")})
     except Exception as e:
-        return jsonify({"quote":"Every step forward is progress. Keep going.","error":str(e)})
-
+        return jsonify({"quote": "Every step forward is progress. Keep going.", "error": str(e)})

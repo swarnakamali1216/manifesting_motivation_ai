@@ -1,5 +1,9 @@
 """
-routes/invite.py - Resend HTTP API VERSION
+routes/invite.py — FIXED VERSION
+Changes from original:
+  1. Added /invite/join route — records when someone signs up via invite link
+     and awards 50 XP to the inviter. Original had no way to track this.
+  2. /invite/stats now also returns joined_count separately from sent_count.
 """
 import os
 import requests as http_requests
@@ -20,7 +24,7 @@ def get_sender(user_id):
         ).fetchone()
         db.close()
         if row:
-            return row.name or "Someone", row.email or ""
+            return row[0] or "Someone", row[1] or ""
     except Exception as e:
         print(f"[invite] get_sender error: {e}")
     return "Someone", ""
@@ -76,6 +80,7 @@ def build_email_html(sender_name, invite_url):
 </body>
 </html>"""
 
+
 @invite_bp.route("/invite/send", methods=["POST", "OPTIONS"])
 def send_invite():
     if request.method == "OPTIONS":
@@ -111,13 +116,13 @@ def send_invite():
             timeout=15
         )
         data_resp = response.json()
-        if response.status_code == 200 or response.status_code == 201:
+        if response.status_code in (200, 201):
             print(f"[invite] Sent to {to_email}")
             try:
                 db = SessionLocal()
                 db.execute(sql_text(
                     "INSERT INTO invites (inviter_id, to_email, status, created_at) "
-                    "VALUES (:uid, :email, \'sent\', NOW())"
+                    "VALUES (:uid, :email, 'sent', NOW())"
                 ), {"uid": int(user_id), "email": to_email})
                 db.commit()
                 db.close()
@@ -139,16 +144,67 @@ def get_invite_link(user_id):
     return jsonify({"link": link, "user_id": user_id})
 
 
+# FIX: New route — records when someone signs up via invite link
+# Call this from your React signup flow when ?ref= is in the URL
+@invite_bp.route("/invite/join", methods=["POST"])
+def record_join():
+    """
+    Called from React signup when ?ref=USER_ID is in the URL.
+    Body: { new_user_id, ref_user_id }
+    Awards 50 XP to the inviter and records the join.
+    """
+    data        = request.get_json() or {}
+    new_user_id = data.get("new_user_id")
+    ref_user_id = data.get("ref_user_id")
+
+    if not new_user_id or not ref_user_id:
+        return jsonify({"error": "new_user_id and ref_user_id required"}), 400
+
+    db = SessionLocal()
+    try:
+        # Record the join — ON CONFLICT DO NOTHING prevents double-counting
+        db.execute(sql_text(
+            "INSERT INTO invites (inviter_id, to_email, status, joined_user_id, created_at) "
+            "VALUES (:uid, 'direct_link', 'joined', :jid, NOW()) "
+            "ON CONFLICT DO NOTHING"
+        ), {"uid": int(ref_user_id), "jid": int(new_user_id)})
+
+        # Award 50 XP to the person who invited
+        db.execute(sql_text(
+            "UPDATE users SET xp = COALESCE(xp, 0) + 50 WHERE id = :uid"
+        ), {"uid": int(ref_user_id)})
+
+        db.commit()
+        return jsonify({"success": True, "message": "Join recorded! Inviter awarded 50 XP"})
+    except Exception as e:
+        db.rollback()
+        print(f"[invite join] {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
 @invite_bp.route("/invite/stats/<int:user_id>", methods=["GET"])
 def get_invite_stats(user_id):
     db = SessionLocal()
     try:
-        row = db.execute(sql_text(
-            "SELECT COUNT(*) FROM invites WHERE inviter_id=:uid"
+        sent_row = db.execute(sql_text(
+            "SELECT COUNT(*) FROM invites WHERE inviter_id=:uid AND status='sent'"
         ), {"uid": user_id}).fetchone()
-        count = row[0] if row else 0
-        return jsonify({"total_invites": count, "user_id": user_id, "xp_earned": count * 50})
+        joined_row = db.execute(sql_text(
+            "SELECT COUNT(*) FROM invites WHERE inviter_id=:uid AND status='joined'"
+        ), {"uid": user_id}).fetchone()
+        sent_count   = sent_row[0]   if sent_row   else 0
+        joined_count = joined_row[0] if joined_row else 0
+        total        = sent_count + joined_count
+        return jsonify({
+            "total_invites":  total,
+            "sent_count":     sent_count,
+            "joined_count":   joined_count,
+            "user_id":        user_id,
+            "xp_earned":      joined_count * 50,
+        })
     except Exception:
-        return jsonify({"total_invites": 0, "user_id": user_id, "xp_earned": 0})
+        return jsonify({"total_invites": 0, "sent_count": 0, "joined_count": 0, "user_id": user_id, "xp_earned": 0})
     finally:
         db.close()

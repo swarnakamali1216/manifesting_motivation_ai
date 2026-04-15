@@ -196,7 +196,14 @@ function InvitePanel({ user }) {
     }).catch(function(){});
   }
 
-  // ── Email sending via EmailJS (no backend needed) ──────────────────────────
+  function refreshStats() {
+    if (!user?.id) return;
+    axios.get(API+"/invite/stats/"+user.id)
+      .then(function(r){ setIStats(r.data||{}); })
+      .catch(function(){});
+  }
+
+  // ── Email sending via EmailJS + record in DB ───────────────────────────────
   function sendInviteEmail(e) {
     if (e && e.preventDefault) e.preventDefault();
     var trimmed = email.trim().toLowerCase();
@@ -222,14 +229,23 @@ function InvitePanel({ user }) {
       publicKey
     )
     .then(function() {
+      // ✅ FIX 1 — Record the invite in the DB so pgAdmin + stats are accurate
+      axios.post(API + "/invite/send", {
+        user_id:      user.id,
+        invited_email: trimmed,
+      }).catch(function(err) {
+        console.warn("[Invite DB] Could not record invite:", err);
+      });
+
       setResult({
         success: true,
         message: "Invite sent to " + trimmed + "! You will earn +50 XP when they join.",
         email_sent: true,
       });
       setEmail("");
-      // Refresh invite stats
-      axios.get(API+"/invite/stats/"+user.id).then(function(r){ setIStats(r.data||{}); }).catch(function(){});
+
+      // Refresh invite stats after a short delay to let the DB write complete
+      setTimeout(refreshStats, 800);
     })
     .catch(function(err) {
       console.error("[EmailJS] Error:", err);
@@ -241,15 +257,20 @@ function InvitePanel({ user }) {
     .finally(function(){ setSending(false); });
   }
 
+  // ✅ FIX 2 — Normalise stats field names (backend may return any of these)
+  var totalInvited = istats.total_invited || istats.total_invites || istats.sent_count || 0;
+  var totalJoined  = istats.joined        || istats.joined_count  || 0;
+  var totalXP      = istats.xp_earned     || 0;
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:"16px"}}>
 
       {/* Stats row */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:"8px"}}>
         {[
-          {label:"Invited",   value:istats.total_invited||0, icon:"✉️",color:"#7c5cfc"},
-          {label:"Joined",    value:istats.joined||0,         icon:"👥",color:"#4ade80"},
-          {label:"XP Earned", value:(istats.xp_earned||0)+" XP",icon:"⚡",color:"#fbbf24"},
+          {label:"Invited",   value:totalInvited,        icon:"✉️", color:"#7c5cfc"},
+          {label:"Joined",    value:totalJoined,          icon:"👥", color:"#4ade80"},
+          {label:"XP Earned", value:totalXP+" XP",        icon:"⚡", color:"#fbbf24"},
         ].map(function(s){ return (
           <div key={s.label} style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:"14px",padding:"14px 10px",textAlign:"center"}}>
             <div style={{fontSize:"20px",marginBottom:"4px"}}>{s.icon}</div>
@@ -304,11 +325,6 @@ function InvitePanel({ user }) {
               <div style={{marginTop:"6px"}}>
                 <span style={{color:"var(--muted)"}}>Share: </span>
                 <a href={result.link} style={{color:"#7c5cfc",fontSize:"11px",wordBreak:"break-all"}}>{result.link}</a>
-              </div>
-            )}
-            {result.success && !result.email_sent && (
-              <div style={{marginTop:"8px",padding:"8px 12px",borderRadius:"8px",background:"rgba(251,191,36,0.1)",border:"1px solid rgba(251,191,36,0.3)",color:"#b45309",fontSize:"11px"}}>
-                💡 Email not sending? Open <code style={{fontSize:"10px"}}>localhost:5000/api/invite/test-smtp</code> to diagnose
               </div>
             )}
           </div>
@@ -650,4 +666,3 @@ function LeaderboardSection({ userId }) {
 }
 
 export default Badges;
-

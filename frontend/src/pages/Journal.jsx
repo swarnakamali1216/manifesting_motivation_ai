@@ -60,36 +60,83 @@ var PROMPTS = [
 
 
 
-function toIST(iso) {
-  if (!iso) return new Date();
-  var s = (iso + "").replace(" ", "T");
-  if (!s.endsWith("Z") && !s.includes("+")) s += "Z";
-  var d = new Date(s);
-  return isNaN(d) ? new Date() : new Date(d.getTime() + 330 * 60000);
+
+/**
+ * Journal.jsx — TIME FIX ONLY
+ *
+ * PROBLEM: Journal shows "03:17 am" on mobile but actual IST time is "08:47 am".
+ * CAUSE:   Backend stores timestamps as UTC. Frontend was displaying raw UTC time.
+ * FIX:     Use toLocaleString with timeZone: "Asia/Kolkata" for all date/time display.
+ *
+ * Replace your existing date/time formatting functions in Journal.jsx with these:
+ */
+
+// ─── DROP-IN REPLACEMENTS ─────────────────────────────────────────────────────
+// Copy these functions into your Journal.jsx and replace the old formatDate /
+// formatTime / formatDateTime usages.
+
+// "Tuesday, 14 April 2026"
+function formatDate(dateInput) {
+  if (!dateInput) return "";
+  var d = new Date(dateInput);
+  return d.toLocaleDateString("en-IN", {
+    weekday: "long",
+    day:     "numeric",
+    month:   "long",
+    year:    "numeric",
+    timeZone: "Asia/Kolkata",   // ← THE FIX
+  });
 }
 
-function safeDate(iso) {
-  if (!iso) return new Date();
-  var s = (iso+"").replace(" ","T");
-  if (!s.endsWith("Z") && !s.includes("+")) s += "Z";
-  var d = new Date(s);
-  return isNaN(d) ? new Date() : d;
+// "09:01 pm"
+function formatTime(dateInput) {
+  if (!dateInput) return "";
+  var d = new Date(dateInput);
+  return d.toLocaleTimeString("en-IN", {
+    hour:     "2-digit",
+    minute:   "2-digit",
+    hour12:   true,
+    timeZone: "Asia/Kolkata",   // ← THE FIX
+  });
 }
-function formatDate(iso) {
-  if (!iso) return "Unknown Date";
-  var d = safeDate(iso);
-  return d.toLocaleDateString("en-IN", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+
+// "14 Apr 2026"
+function formatShortDate(dateInput) {
+  if (!dateInput) return "";
+  var d = new Date(dateInput);
+  return d.toLocaleDateString("en-IN", {
+    day:   "numeric",
+    month: "short",
+    year:  "numeric",
+    timeZone: "Asia/Kolkata",   // ← THE FIX
+  });
 }
 
-function formatTime(iso) {
-
-  if (!iso) return "";
-
-  var d = toIST(iso);
-
-  return d.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" });
-
+// "Tuesday, 14 April 2026 · 09:01 pm"
+function formatDateTime(dateInput) {
+  return formatDate(dateInput) + " · " + formatTime(dateInput);
 }
+
+/**
+ * HOW TO USE IN YOUR Journal.jsx:
+ *
+ * BEFORE (wrong — shows UTC time):
+ *   new Date(entry.created_at).toLocaleTimeString()
+ *   new Date(entry.created_at).toLocaleDateString()
+ *
+ * AFTER (correct — shows IST):
+ *   formatTime(entry.created_at)
+ *   formatDate(entry.created_at)
+ *   formatDateTime(entry.created_at)
+ *
+ * Find every date/time display in Journal.jsx and replace with the above.
+ * Common spots:
+ *   - Entry card date header (e.g. "Tuesday, 14 April 2026")
+ *   - Entry card time (e.g. "09:01 pm")
+ *   - "This Week's Mood Streak" day labels
+ */
+
+export { formatDate, formatTime, formatShortDate, formatDateTime };
 
 function wordCount(text) {
 

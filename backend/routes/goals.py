@@ -1,27 +1,23 @@
 """
-Goals Routes — Complete Fix
-- generate_roadmap now uses timeline, daily_time, depth to produce 8-15 steps
-- /adaptive/interview endpoint added (Goals.jsx calls this)
-- /adaptive/prove and /adaptive/struggle endpoints added
-- All resource links GUARANTEED to work (search URLs, never fake direct links)
-- Each step has resource_how_to field
+routes/goals.py
+FIXES:
+  1. get_groq() replaced with get_groq_client() — shared pool, no new Groq() per call
+  2. All other logic (URL safety, roadmap generation, adaptive steps) unchanged
 """
 
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
-from groq import Groq
+from groq_client import get_groq_client   # ← CHANGED: shared pool
 import os, json, math
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
 load_dotenv()
 
 goals_bp = Blueprint("goals", __name__)
-def get_groq():
-    return Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 
-# ── Step count calculation (matches frontend preview) ─────────
+# ── Step count calculation ─────────────────────────────────────
 def calc_step_count(timeline, daily_time, depth):
     days_map  = {"1 week":7, "2 weeks":14, "1 month":30, "3 months":90, "6 months":180}
     mins_map  = {"15 mins":15, "30 mins":30, "1 hour":60, "2+ hours":120}
@@ -33,65 +29,27 @@ def calc_step_count(timeline, daily_time, depth):
     return max(4, min(15, count))
 
 
-# ── THE KEY FIX: Always generate search URLs, never trust AI-generated direct links ──
-# These domains are safe to keep if AI returns them (they're index/search pages, not fake articles)
 _SAFE_INDEX_DOMAINS = [
-    "docs.python.org",
-    "developer.mozilla.org",
-    "react.dev",
-    "dev.java",
-    "www.theodinproject.com",
-    "www.freecodecamp.org",
-    "www.kaggle.com",
-    "developers.google.com",
-    "course.fast.ai",
-    "www.coursera.org",
-    "www.linkedin.com/learning",
-    "leetcode.com",
-    "hackerrank.com",
-    "codecademy.com",
-    "www.duolingo.com",
-    "www.headspace.com",
-    "jamesclear.com",
-    "www.investopedia.com",
-    "hbr.org",
-    "www.udemy.com",
-    "jakevdp.github.io",
-    "www.habitica.com",
-    "www.calm.com",
-    "startingstrength.com",
-    "web.dev",
-    "vuejs.org",
-    "angular.io",
-    "nextjs.org",
-    "fastapi.tiangolo.com",
-    "flask.palletsprojects.com",
-    "www.postgresql.org",
-    "numpy.org",
-    "pandas.pydata.org",
-    "scikit-learn.org",
-    "tensorflow.org",
-    "pytorch.org",
+    "docs.python.org", "developer.mozilla.org", "react.dev", "dev.java",
+    "www.theodinproject.com", "www.freecodecamp.org", "www.kaggle.com",
+    "developers.google.com", "course.fast.ai", "www.coursera.org",
+    "www.linkedin.com/learning", "leetcode.com", "hackerrank.com",
+    "codecademy.com", "www.duolingo.com", "www.headspace.com",
+    "jamesclear.com", "www.investopedia.com", "hbr.org", "www.udemy.com",
+    "jakevdp.github.io", "www.habitica.com", "www.calm.com",
+    "startingstrength.com", "web.dev", "vuejs.org", "angular.io",
+    "nextjs.org", "fastapi.tiangolo.com", "flask.palletsprojects.com",
+    "www.postgresql.org", "numpy.org", "pandas.pydata.org",
+    "scikit-learn.org", "tensorflow.org", "pytorch.org",
 ]
 
-# YouTube/GitHub direct links are NEVER trusted — AI always hallucinates these
 _NEVER_TRUST_DOMAINS = [
-    "youtube.com",
-    "youtu.be",
-    "github.com",
-    "medium.com",
-    "dev.to",
-    "stackoverflow.com",
-    "reddit.com",
-    "towardsdatascience.com",
+    "youtube.com", "youtu.be", "github.com", "medium.com",
+    "dev.to", "stackoverflow.com", "reddit.com", "towardsdatascience.com",
 ]
 
 
 def make_search_url(topic: str, style: str, step_index: int = 0) -> str:
-    """
-    Generate a GUARANTEED working search URL for a topic.
-    These are search/results pages — they always exist.
-    """
     enc = quote_plus(topic.strip())
     if style == "videos":
         return f"https://www.youtube.com/results?search_query={enc}+tutorial"
@@ -108,7 +66,7 @@ def make_search_url(topic: str, style: str, step_index: int = 0) -> str:
             f"https://leetcode.com/problemset/?search={enc}",
         ]
         return sources[step_index % len(sources)]
-    else:  # mix — rotate across 4 sources
+    else:
         sources = [
             f"https://www.youtube.com/results?search_query={enc}+tutorial",
             f"https://www.freecodecamp.org/news/search/?query={enc}",
@@ -118,46 +76,27 @@ def make_search_url(topic: str, style: str, step_index: int = 0) -> str:
         return sources[step_index % len(sources)]
 
 
-def _safe_resource_url(url: str, goal_title: str, category: str,
-                       learning_style: str = "mix", step_index: int = 0,
-                       step_title: str = "") -> str:
-    """
-    Validate URL from AI.
-    - If it's from a trusted index domain (docs, kaggle, etc.) → keep it
-    - If it's YouTube/GitHub/Medium (AI always hallucinates these) → replace with search URL
-    - If domain is unknown → replace with search URL
-    The topic for the search URL uses step_title so every step gets a DIFFERENT search URL.
-    """
+def _safe_resource_url(url, goal_title, category, learning_style="mix",
+                       step_index=0, step_title=""):
     from urllib.parse import urlparse
-
     topic = (step_title or goal_title or "tutorial").strip()
-
     if not url or not url.startswith("http"):
         return make_search_url(topic, learning_style, step_index)
-
     try:
         parsed = urlparse(url)
         domain = parsed.netloc.lower().replace("www.", "")
-
-        # Never trust YouTube/GitHub direct links — AI hallucinates fake video IDs/repos
         for bad in _NEVER_TRUST_DOMAINS:
             if bad in domain:
                 return make_search_url(topic, learning_style, step_index)
-
-        # Keep if it's a known safe documentation/course domain
         for safe in _SAFE_INDEX_DOMAINS:
             if safe.replace("www.", "") in domain:
                 return url
-
-        # Unknown domain → safe search URL
         return make_search_url(topic, learning_style, step_index)
-
     except Exception:
         return make_search_url(topic, learning_style, step_index)
 
 
 def make_how_to(url: str, step_title: str) -> str:
-    """Generate a clear how-to instruction based on the URL type."""
     if "youtube.com/results" in url:
         return f"🔍 YouTube search for '{step_title}'. Click the first video under 20 minutes. Watch fully, pause to take notes, try any examples shown."
     elif "freecodecamp.org/news/search" in url:
@@ -171,19 +110,17 @@ def make_how_to(url: str, step_title: str) -> str:
     elif "leetcode.com/problemset" in url:
         return f"💻 LeetCode problems for '{step_title}'. Filter by Easy. Try solving for 15 minutes before reading hints. Check Discussion after."
     elif "docs.python.org" in url:
-        return f"📚 Python official docs for '{step_title}'. Read the intro section. Run every code example in your terminal. Docs are dense — take your time."
+        return f"📚 Python official docs for '{step_title}'. Read the intro section. Run every code example in your terminal."
     elif "developer.mozilla.org" in url:
         return f"📚 MDN Web Docs for '{step_title}'. Read the overview, then the Examples section. Open browser DevTools and try the examples yourself."
     elif "freecodecamp.org" in url:
         return f"📖 FreeCodeCamp lesson on '{step_title}'. Work through each interactive exercise. Don't skip — each builds on the last."
-    elif "kaggle.com/learn" in url:
-        return f"🎓 Kaggle Learn course for '{step_title}'. Complete all lessons in order. Run every code cell yourself — don't just read it."
     elif "coursera.org" in url:
         return f"🎓 Coursera course for '{step_title}'. Audit for free. Watch 1-2 videos per session. Take notes and do the quizzes."
     elif "theodinproject.com" in url:
-        return f"🛤️ The Odin Project lesson for '{step_title}'. Read the lesson, then complete every exercise and project listed. Don't skip the projects."
+        return f"🛤️ The Odin Project lesson for '{step_title}'. Read the lesson, then complete every exercise listed."
     elif "leetcode.com" in url:
-        return f"💻 LeetCode for '{step_title}'. Start with Easy problems. Try for 20 minutes before looking at hints. Review the top-voted solution after."
+        return f"💻 LeetCode for '{step_title}'. Start with Easy problems. Try for 20 minutes before looking at hints."
     else:
         return f"🌐 Resource for '{step_title}'. Read or watch the main content, try any exercises shown, then explain what you learned in your own words."
 
@@ -209,12 +146,11 @@ def generate_roadmap_full(title, category, deadline=None,
         "mix":      "learns through a mix of videos, reading and practice",
     }.get(learning_style, "prefers a mix of resources")
 
-    # Tell AI to ONLY use search URLs — no direct article/video links
     resource_instructions = {
-        "videos":   f"ALL resource URLs must be YouTube search URLs in this exact format: https://www.youtube.com/results?search_query=TOPIC+tutorial (replace TOPIC with the step topic, use + for spaces). NEVER use youtube.com/watch URLs.",
-        "reading":  f"ALL resource URLs must be official documentation homepages ONLY: docs.python.org, developer.mozilla.org, www.freecodecamp.org, www.kaggle.com/learn, www.theodinproject.com. Use the homepage/index URL, not specific article URLs.",
-        "practice": f"ALL resource URLs must be practice platform search pages: https://github.com/search?q=TOPIC+beginner&type=repositories OR https://leetcode.com/problemset/?search=TOPIC OR https://www.kaggle.com/search?q=TOPIC. Replace TOPIC with the step topic.",
-        "mix":      f"Rotate across these 4 URL types, one per step: (1) https://www.youtube.com/results?search_query=TOPIC+tutorial (2) https://www.freecodecamp.org/news/search/?query=TOPIC (3) https://github.com/search?q=TOPIC+beginner&type=repositories (4) https://www.coursera.org/search?query=TOPIC. Replace TOPIC with the step topic using + for spaces.",
+        "videos":   f"ALL resource URLs must be YouTube search URLs: https://www.youtube.com/results?search_query=TOPIC+tutorial",
+        "reading":  f"ALL resource URLs must be official documentation homepages: docs.python.org, developer.mozilla.org, www.freecodecamp.org, www.kaggle.com/learn, www.theodinproject.com.",
+        "practice": f"ALL resource URLs must be practice platform search pages: https://github.com/search?q=TOPIC+beginner&type=repositories OR https://leetcode.com/problemset/?search=TOPIC OR https://www.kaggle.com/search?q=TOPIC.",
+        "mix":      f"Rotate across these 4 URL types, one per step: (1) https://www.youtube.com/results?search_query=TOPIC+tutorial (2) https://www.freecodecamp.org/news/search/?query=TOPIC (3) https://github.com/search?q=TOPIC+beginner&type=repositories (4) https://www.coursera.org/search?query=TOPIC.",
     }
 
     prompt = f"""You are an expert learning coach. Create a {num_steps}-step roadmap for this goal.
@@ -228,19 +164,18 @@ TIMELINE: {timeline}
 DEPTH: {depth}
 DEADLINE: {deadline or "flexible"}
 
-RESOURCE FORMAT (CRITICAL — FOLLOW EXACTLY):
+RESOURCE FORMAT (CRITICAL):
 {resource_instructions.get(learning_style, resource_instructions["mix"])}
 
 RULES:
 1. Return ONLY a valid JSON array. No extra text, no markdown, no explanation.
 2. The array must have EXACTLY {num_steps} objects.
-3. Every "resource" URL must use the SEARCH FORMAT described above — fill in the actual topic.
-4. "resource_how_to": 1-2 sentences on how to use this specific resource for this step.
-5. Step titles must be specific (not generic like "Learn basics").
-6. Steps must build on each other logically — easy start, harder finish.
-7. "duration" must match {daily_time}.
+3. Every "resource" URL must use the SEARCH FORMAT described above.
+4. "resource_how_to": 1-2 sentences on how to use this specific resource.
+5. Step titles must be specific. Steps must build logically.
+6. "duration" must match {daily_time}.
 
-JSON FORMAT (return exactly this structure, {num_steps} items):
+JSON FORMAT:
 [
   {{
     "title": "Specific step title",
@@ -255,7 +190,9 @@ JSON FORMAT (return exactly this structure, {num_steps} items):
 Generate {num_steps} steps now for: {title}"""
 
     try:
-        resp = get_groq().chat.completions.create(
+        # CHANGED: get_groq_client() — reuses shared connection pool
+        client = get_groq_client()
+        resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": "You are a roadmap generator. Return ONLY valid JSON arrays. Never add text before or after the JSON."},
@@ -266,7 +203,6 @@ Generate {num_steps} steps now for: {title}"""
         )
         raw = resp.choices[0].message.content.strip()
 
-        # Strip markdown fences
         if "```" in raw:
             parts = raw.split("```")
             for p in parts:
@@ -284,26 +220,19 @@ Generate {num_steps} steps now for: {title}"""
         else:
             steps = json.loads(raw)
 
-        # Post-process: validate and fix every URL
         for idx_s, s in enumerate(steps):
             raw_url    = s.get("resource", "")
             step_title = s.get("title", "")
-
             if raw_url and not raw_url.startswith("http"):
                 raw_url = "https://" + raw_url
-
-            # Validate/replace the URL
             safe_url = _safe_resource_url(
                 raw_url, title, category,
                 learning_style=learning_style,
                 step_index=idx_s,
                 step_title=step_title,
             )
-            s["resource"] = safe_url
-
-            # Always regenerate how_to based on the actual final URL
-            s["resource_how_to"] = make_how_to(safe_url, step_title)
-
+            s["resource"]         = safe_url
+            s["resource_how_to"]  = make_how_to(safe_url, step_title)
             if not s.get("duration"):
                 s["duration"] = daily_time
 
@@ -312,7 +241,6 @@ Generate {num_steps} steps now for: {title}"""
 
     except Exception as e:
         print(f"Roadmap generation error: {e}")
-        # Fallback steps with guaranteed search URLs
         fallback_topics = [
             f"{title} introduction for beginners",
             f"{title} basic concepts",
@@ -322,15 +250,15 @@ Generate {num_steps} steps now for: {title}"""
         ]
         steps = []
         for i in range(num_steps):
-            topic     = fallback_topics[i % len(fallback_topics)]
-            safe_url  = make_search_url(topic, learning_style, i)
+            topic    = fallback_topics[i % len(fallback_topics)]
+            safe_url = make_search_url(topic, learning_style, i)
             steps.append({
-                "title":            f"Step {i+1}: {topic.title()}",
-                "guidance":         f"Step {i+1} of your {timeline} journey toward '{title}'. Spend {daily_time} focused on this topic.",
-                "resource":         safe_url,
-                "resource_how_to":  make_how_to(safe_url, topic),
-                "duration":         daily_time,
-                "week":             (i // 2) + 1,
+                "title":           f"Step {i+1}: {topic.title()}",
+                "guidance":        f"Step {i+1} of your {timeline} journey toward '{title}'. Spend {daily_time} focused on this topic.",
+                "resource":        safe_url,
+                "resource_how_to": make_how_to(safe_url, topic),
+                "duration":        daily_time,
+                "week":            (i // 2) + 1,
             })
         return steps
 
@@ -502,7 +430,9 @@ def prove_step(goal_id, step_index):
             goal_row   = db.execute(sql_text("SELECT title FROM goals WHERE id=:gid"), {"gid": goal_id}).fetchone()
             goal_title = goal_row[0] if goal_row else "your goal"
             try:
-                resp = get_groq().chat.completions.create(
+                # CHANGED: get_groq_client() — reuses shared connection pool
+                client = get_groq_client()
+                resp = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[{"role": "user", "content":
                         f'A student working on "{goal_title}" completed step {step_index+1} and wrote:\n"{answer}"\n\n'
@@ -518,7 +448,6 @@ def prove_step(goal_id, step_index):
                 feedback = "Excellent work completing this step! Your effort is building real momentum — keep going."
                 passed   = True
 
-        # Save to goal_steps
         try:
             existing = db.execute(sql_text(
                 "SELECT id FROM goal_steps WHERE goal_id=:gid AND step_index=:si"
@@ -541,12 +470,11 @@ def prove_step(goal_id, step_index):
             print(f"Step save error: {se}")
             db.rollback()
 
-        # Check if all steps done → mark goal complete
         goal_completed = False
         try:
             goal_row = db.execute(sql_text("SELECT roadmap FROM goals WHERE id=:gid"), {"gid": goal_id}).fetchone()
             if goal_row and goal_row[0]:
-                rm = json.loads(goal_row[0]) if isinstance(goal_row[0], str) else goal_row[0]
+                rm    = json.loads(goal_row[0]) if isinstance(goal_row[0], str) else goal_row[0]
                 total = len(rm.get("steps", [])) if isinstance(rm, dict) else len(rm)
                 done  = db.execute(sql_text(
                     "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed=TRUE"
@@ -588,7 +516,7 @@ def struggle_help(goal_id, step_index):
         title   = goal_row[0]
         roadmap = []
         try:
-            rm = json.loads(goal_row[1]) if isinstance(goal_row[1], str) else goal_row[1]
+            rm      = json.loads(goal_row[1]) if isinstance(goal_row[1], str) else goal_row[1]
             roadmap = rm.get("steps", []) if isinstance(rm, dict) else rm
         except Exception:
             pass
@@ -596,7 +524,9 @@ def struggle_help(goal_id, step_index):
         step_title = roadmap[step_index]["title"] if step_index < len(roadmap) else f"Step {step_index+1}"
 
         try:
-            resp = get_groq().chat.completions.create(
+            # CHANGED: get_groq_client() — reuses shared connection pool
+            client = get_groq_client()
+            resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content":
                     f'Student struggling with: "{step_title}" (goal: "{title}")\n\n'

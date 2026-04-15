@@ -1,22 +1,19 @@
 """
-routes/journal.py — FIXED VERSION
-Changes from original:
-  1. Module-level _groq singleton — no new Groq() per request
+routes/journal.py
+FIXES:
+  1. Uses shared groq_client.get_groq_client() — no new Groq() per module/request
   2. timeout=15 on all completions.create calls
-  3. Added title and tags columns to INSERT (were missing from original)
+  3. title and tags columns handled with fallback
 """
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
-from groq import Groq
+from groq_client import get_groq_client   # ← CHANGED: shared pool
 import os
 from dotenv import load_dotenv
 load_dotenv()
 
 journal_bp = Blueprint("journal", __name__)
-
-# FIX 1: module-level singleton — created once, reused every request
-_groq = Groq(api_key=os.getenv('GROQ_API_KEY'))
 
 
 # ── GET /journal ─────────────────────────────────────────────
@@ -45,7 +42,6 @@ def get_journal():
         } for r in rows])
     except Exception as e:
         print(f"[journal GET] {e}")
-        # Fallback — try without title/tags columns if they don't exist yet
         try:
             rows2 = db.execute(sql_text(
                 "SELECT id, user_id, content, mood, mood_score, ai_insight, created_at "
@@ -85,7 +81,6 @@ def add_journal():
     try:
         db = SessionLocal()
 
-        # Mood score via VADER
         mood_score = 0.0
         try:
             from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
@@ -94,10 +89,11 @@ def add_journal():
         except Exception:
             pass
 
-        # FIX 2: AI insight using _groq + timeout=15
+        # CHANGED: get_groq_client() — reuses shared connection pool
         ai_insight = None
         try:
-            resp = _groq.chat.completions.create(
+            client = get_groq_client()
+            resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content":
                     f"A student wrote this journal entry (mood: {mood}):\n\"{content[:400]}\"\n\n"
@@ -111,7 +107,6 @@ def add_journal():
         except Exception as e:
             print(f"[journal AI insight] {e}")
 
-        # Try insert with title + tags; fallback without if columns missing
         try:
             row = db.execute(sql_text(
                 "INSERT INTO journal_entries (user_id, title, content, mood, mood_score, tags, ai_insight, created_at) "
@@ -128,14 +123,12 @@ def add_journal():
 
         db.commit()
 
-        # Award XP
         try:
             db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+15 WHERE id=:uid"), {"uid": user_id})
             db.commit()
         except Exception:
             db.rollback()
 
-        # Update streak after journal save
         try:
             from streak_utils import update_user_streak
             update_user_streak(db, user_id)
@@ -215,7 +208,6 @@ def weekly_recap():
     db = None
     try:
         db = SessionLocal()
-
         rows = db.execute(sql_text(
             "SELECT content, mood, mood_score, created_at "
             "FROM journal_entries WHERE user_id=:uid "
@@ -233,7 +225,6 @@ def weekly_recap():
                 "tough":       0,
             })
 
-        # Stats
         scores     = [r[2] for r in rows if r[2] is not None]
         avg_mood   = round(sum(scores) / len(scores), 2) if scores else 0
         moods      = [r[1] for r in rows if r[1]]
@@ -247,14 +238,16 @@ def weekly_recap():
             for r in rows
         ])
 
-        # FIX 2: use _groq + timeout=15
         recap_text = (
             f"You wrote {len(rows)} journal entries this week "
             f"with an average mood of {avg_mood}. "
             f"Keep reflecting — every entry builds self-awareness."
         )
+
+        # CHANGED: get_groq_client() — reuses shared connection pool
         try:
-            resp = _groq.chat.completions.create(
+            client = get_groq_client()
+            resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content":
                     f"You are a warm AI coach reviewing a student's journal entries from the past week.\n\n"

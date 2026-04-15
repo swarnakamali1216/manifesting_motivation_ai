@@ -2,8 +2,17 @@
 Manifesting Motivation AI — Backend
 KEY FIX: admin_bp registered at /api (routes use /admin/... prefix internally)
          privacy_bp registered at /api/privacy (routes use /export etc)
+
+CHANGES FROM ORIGINAL:
+  1. groq_client is pre-initialized at startup (eliminates cold start)
+  2. Auto warm-up thread fires 2s after Flask starts
+  3. GROQ_MODEL env var supported (change model without code edits)
+  4. /api/health now returns worker PID and warmup status for debugging
 """
+
 import os
+import threading
+import time
 from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -23,6 +32,9 @@ CORS(app,
      methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 
 
+# ---------------------------------------------------------------------------
+# Blueprint loader (unchanged from original)
+# ---------------------------------------------------------------------------
 def _find_bp(module_path):
     """Auto-detect any Flask Blueprint in a module."""
     from flask import Blueprint as BP
@@ -49,7 +61,7 @@ def load(name, module_path, bp_name, prefix):
         print(f"⚠️  {name}: {e}")
 
 
-# -- Core routes -----------------------------------------------
+# -- Core routes (ALL UNCHANGED) -----------------------------------------------
 load("auth",              "routes.auth",             "auth_bp",           "/api/auth")
 load("motivation",        "routes.motivation",        "motivation_bp",     "/api")
 load("goals",             "routes.goals",             "goals_bp",          "/api")
@@ -74,10 +86,20 @@ load("adaptive_goals",    "routes.adaptive_goals",    "adaptive_goals_bp", "/api
 load("safety",            "routes.safety",            "safety_bp",         "/api")
 
 
-# -- Utility routes --------------------------------------------
+# ---------------------------------------------------------------------------
+# Utility routes
+# ---------------------------------------------------------------------------
+_warmup_done = False   # tracked so /api/health can report status
+
+
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok"}), 200
+    return jsonify({
+        "status": "ok",
+        "pid": os.getpid(),
+        "groq_warmed": _warmup_done,
+        "groq_model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    }), 200
 
 
 @app.route("/api/routes", methods=["GET"])
@@ -93,7 +115,9 @@ def list_routes():
     return jsonify(sorted(routes, key=lambda x: x["path"])), 200
 
 
-# -- DB & VADER init -------------------------------------------
+# ---------------------------------------------------------------------------
+# DB & VADER init (unchanged)
+# ---------------------------------------------------------------------------
 try:
     from models import Base, engine
     Base.metadata.create_all(bind=engine)
@@ -103,23 +127,62 @@ except Exception as e:
 
 try:
     from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-    SentimentIntensityAnalyzer()
+    _vader = SentimentIntensityAnalyzer()   # keep reference — pre-loads the lexicon
     print("✅ VADER sentiment loaded")
 except Exception as e:
     print(f"⚠️  VADER: {e}")
 
+
+# ---------------------------------------------------------------------------
+# Auto warm-up — fires in background 2s after Flask starts
+# Eliminates cold-start delay for the very first real user request
+# ---------------------------------------------------------------------------
+def _auto_warmup():
+    """
+    Runs in a daemon thread after startup.
+    1. Pre-warms the Groq TCP connection (the main cold-start cause)
+    2. No login needed — hits Groq directly via the shared client
+    """
+    global _warmup_done
+    time.sleep(2)   # wait for Flask to fully bind and be ready
+
+    print("🔥 Starting Groq warm-up...")
+    try:
+        from groq_client import warmup_groq
+        success = warmup_groq()
+        _warmup_done = success
+        if success:
+            print("✅ Groq warm-up complete — first user request will be fast!")
+        else:
+            print("⚠️  Groq warm-up failed — first request may be slightly slower")
+    except Exception as e:
+        print(f"⚠️  Warm-up error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    groq   = "✅" if os.getenv("GROQ_API_KEY")      else "❌"
-    eleven = "✅" if os.getenv("ELEVENLABS_API_KEY") else "❌"
-    smtp   = os.getenv("SMTP_USER", "")
+    groq_key = os.getenv("GROQ_API_KEY")
+    eleven   = os.getenv("ELEVENLABS_API_KEY")
+    smtp     = os.getenv("SMTP_USER", "")
+
+    groq_status  = "✅" if groq_key  else "❌"
+    eleven_status = "✅" if eleven else "❌"
+
     print(f"""
 =======================================================
   🦋  Manifesting Motivation AI — Backend Running!
   🌐  http://localhost:5000
-  🤖  Groq:       {groq}
-  🎙️  ElevenLabs: {eleven}
+  🤖  Groq:       {groq_status}  model: {os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')}
+  🎙️  ElevenLabs: {eleven_status}
   📧  SMTP:       {"✅ " + smtp[:28] if smtp else "❌  Not configured"}
   🗺️  Routes:     http://localhost:5000/api/routes
+  ⚡  Cold start: Auto warm-up will fire in 2s...
 =======================================================
 """)
+
+    # Start warm-up thread BEFORE app.run so it fires as soon as Flask is ready
+    threading.Thread(target=_auto_warmup, daemon=True).start()
+
     app.run(host="0.0.0.0", port=5000, debug=False)

@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from groq import Groq
+from groq_client import get_groq_client   # ← CHANGED: shared pool
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from models import SessionLocal, CheckIn, MotivationSession
 from datetime import datetime, timedelta, date as dt_date
@@ -9,9 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 checkin_bp = Blueprint("checkin", __name__)
-def get_groq():
-    return Groq(api_key=os.getenv('GROQ_API_KEY'))
-analyzer = SentimentIntensityAnalyzer()
+analyzer   = SentimentIntensityAnalyzer()
 
 IST = 330  # UTC+5:30 minutes
 
@@ -92,7 +90,6 @@ def do_checkin():
     mood = data.get("mood", "neutral")
     note = data.get("note", "")
 
-    # ── Step 1: Get AI reply (no DB needed) ─────────────────────────────
     memory_ctx = ""
     recent_ctx = ""
     db_ctx = SessionLocal()
@@ -112,8 +109,10 @@ def do_checkin():
     finally:
         db_ctx.close()
 
+    # CHANGED: get_groq_client() — reuses shared connection pool
     try:
-        resp = get_groq().chat.completions.create(
+        client   = get_groq_client()
+        resp     = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content":
                 f"You are a caring daily check-in coach.\n{memory_ctx}{recent_ctx}"
@@ -128,8 +127,6 @@ def do_checkin():
         print(f"AI checkin error: {e}")
         ai_reply = f"Thanks for checking in feeling {mood} today. Keep going — one small step forward is all you need."
 
-    # ── Step 2: Save check-in in its OWN session and commit immediately ──
-    # This is isolated so ai_memory errors CANNOT roll it back.
     db_save = SessionLocal()
     try:
         checkin = CheckIn(user_id=user_id, mood=mood, note=note, ai_reply=ai_reply)
@@ -145,9 +142,8 @@ def do_checkin():
     finally:
         db_save.close()
 
-    # ── Step 3: Update ai_memory in a SEPARATE session (failure is OK) ──
     today_str = now_ist().strftime("%Y-%m-%d")
-    db_mem = SessionLocal()
+    db_mem    = SessionLocal()
     try:
         existing = db_mem.execute(sql_text(
             "SELECT id, memory_text FROM ai_memory WHERE user_id=:uid LIMIT 1"
@@ -164,8 +160,6 @@ def do_checkin():
                 WHERE user_id = :uid
             """), {"mt": new_text[:500], "em": mood, "now": datetime.utcnow(), "uid": user_id})
         else:
-            # Only insert columns we know exist — skip "memory" column
-            # which caused the original crash
             try:
                 init = f"User mood: {mood}. First check-in: {today_str}."
                 db_mem.execute(sql_text("""
@@ -190,18 +184,16 @@ def do_checkin():
 def get_checkins(user_id):
     db = SessionLocal()
     try:
-        tbl = _checkin_table(db)
-        print(f"[checkin/history] Querying table: {tbl} for user {user_id}")
+        tbl  = _checkin_table(db)
         rows = db.execute(sql_text(
             f"SELECT id, mood, note, ai_reply, created_at FROM {tbl} WHERE user_id=:uid ORDER BY created_at DESC"
         ), {"uid": user_id}).fetchall()
-        print(f"[checkin/history] Found {len(rows)} rows")
         return jsonify([{
-            "id":       r[0],
-            "mood":     r[1] or "okay",
-            "note":     r[2] or "",
-            "ai_reply": r[3] or "",
-            "date":     ist_date(r[4]).isoformat() if r[4] else None,
+            "id":         r[0],
+            "mood":       r[1] or "okay",
+            "note":       r[2] or "",
+            "ai_reply":   r[3] or "",
+            "date":       ist_date(r[4]).isoformat() if r[4] else None,
             "created_at": to_ist(r[4]).isoformat() if r[4] else None,
         } for r in rows])
     except Exception as e:
@@ -217,9 +209,9 @@ def get_checkins(user_id):
 @checkin_bp.route("/checkin/today/<int:user_id>", methods=["GET"])
 def checked_in_today(user_id):
     today = now_ist().date()
-    db = SessionLocal()
+    db    = SessionLocal()
     try:
-        tbl = _checkin_table(db)
+        tbl  = _checkin_table(db)
         rows = db.execute(sql_text(
             f"SELECT created_at FROM {tbl} WHERE user_id=:uid ORDER BY created_at DESC LIMIT 5"
         ), {"uid": user_id}).fetchall()
@@ -237,11 +229,11 @@ def get_streak(user_id):
     db = SessionLocal()
     try:
         all_dates = _all_activity_dates(db, user_id)
-        streak = _calc_streak(all_dates)
+        streak    = _calc_streak(all_dates)
         return jsonify({
-            "streak": streak,
+            "streak":           streak,
             "total_active_days": len(all_dates),
-            "user_id": user_id
+            "user_id":          user_id
         })
     except Exception as e:
         print("Streak error:", e)
@@ -259,7 +251,6 @@ def daily_nudge(user_id):
             "SELECT emotion,created_at FROM motivation_sessions WHERE user_id=:uid ORDER BY created_at DESC LIMIT 14"
         ), {"uid": user_id}).fetchall()
 
-        
         goal = db.execute(sql_text(
             "SELECT id,title FROM goals WHERE user_id=:uid AND completed IS NULL ORDER BY id DESC LIMIT 1"
         ), {"uid": user_id}).fetchone()
@@ -274,21 +265,21 @@ def daily_nudge(user_id):
                 ), {"gid": goal_id}).fetchone()[0] or 0
             except Exception: pass
 
-        all_dates = _all_activity_dates(db, user_id)
-        streak = _calc_streak(all_dates)
-        hour = now_ist().hour
+        all_dates   = _all_activity_dates(db, user_id)
+        streak      = _calc_streak(all_dates)
+        hour        = now_ist().hour
         time_of_day = "morning" if hour < 12 else "afternoon" if hour < 17 else "evening"
 
         if not session_moods:
             return jsonify({
-                "nudge": "Welcome! Set your first goal and let's build your journey together.",
-                "mood_type": "neutral", "streak": streak, "steps_done": 0,
-                "goal_title": goal_title, "time_of_day": time_of_day
+                "nudge":       "Welcome! Set your first goal and let's build your journey together.",
+                "mood_type":   "neutral", "streak": streak, "steps_done": 0,
+                "goal_title":  goal_title, "time_of_day": time_of_day
             })
 
-        recent7   = session_moods[:7]
-        pos_count = sum(1 for r in recent7 if r[0] == "positive")
-        neg_count = sum(1 for r in recent7 if r[0] in ("negative", "stressed", "anxious", "sad"))
+        recent7    = session_moods[:7]
+        pos_count  = sum(1 for r in recent7 if r[0] == "positive")
+        neg_count  = sum(1 for r in recent7 if r[0] in ("negative", "stressed", "anxious", "sad"))
         total_mood = len(recent7)
         pos_ratio  = pos_count / total_mood if total_mood else 0
         neg_ratio  = neg_count / total_mood if total_mood else 0
@@ -298,18 +289,20 @@ def daily_nudge(user_id):
         step_part   = f" You're on step {steps_done+1}." if goal_title else ""
 
         if pos_ratio >= 0.6:
-            nudge = f"Good {time_of_day}! You're on a great run.{streak_part} Keep the momentum on {goal_part}!{step_part}"
+            nudge     = f"Good {time_of_day}! You're on a great run.{streak_part} Keep the momentum on {goal_part}!{step_part}"
             mood_type = "positive"
         elif neg_ratio >= 0.5:
-            nudge = f"Good {time_of_day}. Tough week — that's okay. 10 minutes on {goal_part} is a win today."
+            nudge     = f"Good {time_of_day}. Tough week — that's okay. 10 minutes on {goal_part} is a win today."
             mood_type = "struggling"
         else:
-            nudge = f"Good {time_of_day}!{streak_part} One small step on {goal_part} sets the tone.{step_part}"
+            nudge     = f"Good {time_of_day}!{streak_part} One small step on {goal_part} sets the tone.{step_part}"
             mood_type = "neutral"
 
         if len(session_moods) >= 3 and goal_title:
             try:
-                ai_resp = get_groq().chat.completions.create(
+                # CHANGED: get_groq_client() — reuses shared connection pool
+                client   = get_groq_client()
+                ai_resp  = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[{"role": "user", "content":
                         f"One motivating nudge (2 sentences, under 50 words).\n"
@@ -324,9 +317,14 @@ def daily_nudge(user_id):
                 print("AI nudge error:", e)
 
         return jsonify({
-            "nudge": nudge, "mood_type": mood_type, "streak": streak,
-            "steps_done": steps_done, "goal_title": goal_title,
-            "time_of_day": time_of_day, "pos_sessions": pos_count, "neg_sessions": neg_count
+            "nudge":        nudge,
+            "mood_type":    mood_type,
+            "streak":       streak,
+            "steps_done":   steps_done,
+            "goal_title":   goal_title,
+            "time_of_day":  time_of_day,
+            "pos_sessions": pos_count,
+            "neg_sessions": neg_count
         })
     except Exception as e:
         print("Daily nudge error:", e)

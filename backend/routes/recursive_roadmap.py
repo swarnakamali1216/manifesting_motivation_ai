@@ -1,10 +1,9 @@
 """
-routes/recursive_roadmap.py — Recursive Roadmap Engine
-
-FIXES APPLIED:
-  1. Module-level Groq client — created once, not per request
-  2. timeout=15 added to all Groq completions.create calls (LLaMA can hang)
-  3. analyse_pace called only ONCE per /regenerate request (was called twice)
+routes/recursive_roadmap.py
+FIXES:
+  1. get_groq_client() — shared pool, no new Groq() per module
+  2. timeout=15 on all completions.create calls
+  3. analyse_pace called only ONCE per /regenerate request
   4. get_attempt_history called only ONCE per /regenerate request
 """
 
@@ -12,22 +11,17 @@ from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
 from datetime import datetime, timedelta
-from groq import Groq
+from groq_client import get_groq_client   # ← CHANGED: shared pool
 import os, json
 
 recursive_bp = Blueprint("recursive", __name__)
 
-# FIX 1: Module-level singleton — was get_groq() called fresh on every request
-_groq = Groq(api_key=os.getenv('GROQ_API_KEY'))
+STRUGGLE_THRESHOLD  = 2
+FAST_PASS_THRESHOLD = 3
+QUICK_PASS_MINUTES  = 10
 
-# ── Constants ──────────────────────────────────────────────────────────────────
-STRUGGLE_THRESHOLD  = 2   # consecutive failures before simplifying
-FAST_PASS_THRESHOLD = 3   # consecutive quick passes before advancing
-QUICK_PASS_MINUTES  = 10  # completing a step in <10 min = "fast"
 
-# ── DB helpers ─────────────────────────────────────────────────────────────────
 def get_attempt_history(db, goal_id: int, user_id: int) -> list:
-    """Get all step attempts for this goal ordered by time."""
     try:
         rows = db.execute(sql_text("""
             SELECT step_index, passed, time_taken_minutes, created_at
@@ -40,8 +34,8 @@ def get_attempt_history(db, goal_id: int, user_id: int) -> list:
     except Exception:
         return []
 
+
 def log_attempt(db, goal_id: int, user_id: int, step_index: int, passed: bool, minutes: float):
-    """Log a step attempt."""
     try:
         db.execute(sql_text("""
             INSERT INTO goal_step_attempts (goal_id, user_id, step_index, passed, time_taken_minutes, created_at)
@@ -52,16 +46,12 @@ def log_attempt(db, goal_id: int, user_id: int, step_index: int, passed: bool, m
     except Exception as e:
         print(f"Log attempt error: {e}")
 
+
 def analyse_pace(history: list) -> dict:
-    """
-    Analyse recent attempts to determine if user needs easier or harder content.
-    Returns: {action: 'simplify'|'advance'|'maintain', reason: str, confidence: int}
-    """
     if not history or len(history) < 2:
         return {"action": "maintain", "reason": "Not enough data yet", "confidence": 0}
 
-    recent = history[:6]  # last 6 attempts
-
+    recent = history[:6]
     consecutive_fails  = 0
     consecutive_passes = 0
     quick_passes       = 0
@@ -98,10 +88,9 @@ def analyse_pace(history: list) -> dict:
     else:
         return {"action": "maintain", "reason": "Pace is good — keep going!", "confidence": 70}
 
+
 def regenerate_roadmap_ai(goal_title: str, current_steps: list, action: str,
                            learning_style: str, daily_time: int, reason: str) -> list:
-    """Use Groq LLaMA to regenerate roadmap at adjusted difficulty."""
-
     direction = {
         "simplify": "SIMPLER and more beginner-friendly with smaller steps and more guidance",
         "advance":  "MORE ADVANCED and challenging with deeper concepts and less hand-holding",
@@ -134,8 +123,9 @@ Respond ONLY with a JSON array, no explanation:
 ]"""
 
     try:
-        # FIX 2: timeout=15 — LLaMA can hang indefinitely without it
-        resp = _groq.chat.completions.create(
+        # CHANGED: get_groq_client() — reuses shared connection pool, timeout=15
+        client = get_groq_client()
+        resp   = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1200,
@@ -144,7 +134,7 @@ Respond ONLY with a JSON array, no explanation:
         )
         raw = resp.choices[0].message.content.strip()
         import re
-        raw = re.sub(r"```json|```", "", raw).strip()
+        raw   = re.sub(r"```json|```", "", raw).strip()
         steps = json.loads(raw)
         if isinstance(steps, list) and len(steps) > 0:
             return steps
@@ -153,14 +143,10 @@ Respond ONLY with a JSON array, no explanation:
 
     return []
 
+
 # ── POST /api/recursive/log-attempt ───────────────────────────────────────────
 @recursive_bp.route("/recursive/log-attempt", methods=["POST"])
 def log_step_attempt():
-    """
-    Log a step attempt and check if roadmap needs adjustment.
-    Body: { goal_id, user_id, step_index, passed, time_minutes }
-    Returns: { action, reason, should_regenerate, confidence }
-    """
     db   = SessionLocal()
     data = request.get_json() or {}
 
@@ -175,34 +161,26 @@ def log_step_attempt():
 
     try:
         log_attempt(db, int(goal_id), int(user_id), step_index, passed, minutes)
-        history = get_attempt_history(db, int(goal_id), int(user_id))
+        history  = get_attempt_history(db, int(goal_id), int(user_id))
         analysis = analyse_pace(history)
 
         return jsonify({
-            "logged":             True,
-            "action":             analysis["action"],
-            "reason":             analysis["reason"],
-            "confidence":         analysis["confidence"],
-            "should_regenerate":  analysis["action"] != "maintain" and analysis["confidence"] >= 50,
-            "total_attempts":     len(history),
+            "logged":            True,
+            "action":            analysis["action"],
+            "reason":            analysis["reason"],
+            "confidence":        analysis["confidence"],
+            "should_regenerate": analysis["action"] != "maintain" and analysis["confidence"] >= 50,
+            "total_attempts":    len(history),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
         db.close()
 
+
 # ── POST /api/recursive/regenerate ────────────────────────────────────────────
 @recursive_bp.route("/recursive/regenerate", methods=["POST"])
 def regenerate_roadmap():
-    """
-    Recursively regenerate roadmap at adjusted difficulty.
-    Body: { goal_id, user_id, goal_title, current_steps, learning_style, daily_time }
-    Returns: { new_steps, action, reason, difficulty_changed }
-
-    FIX 3: history fetched once, analyse_pace called once.
-    Previously analyse_pace was called twice and history fetched twice
-    (once implicitly inside the first analyse_pace call path).
-    """
     db   = SessionLocal()
     data = request.get_json() or {}
 
@@ -217,7 +195,7 @@ def regenerate_roadmap():
         return jsonify({"error": "goal_id, user_id, goal_title required"}), 400
 
     try:
-        # FIX 3: fetch history once, pass to analyse_pace once
+        # fetch history once, pass to analyse_pace once
         history  = get_attempt_history(db, int(goal_id), int(user_id))
         analysis = analyse_pace(history)
         action   = analysis["action"]
@@ -266,10 +244,10 @@ def regenerate_roadmap():
     finally:
         db.close()
 
+
 # ── GET /api/recursive/pace/<goal_id>/<user_id> ────────────────────────────────
 @recursive_bp.route("/recursive/pace/<int:goal_id>/<int:user_id>", methods=["GET"])
 def get_pace_analysis(goal_id, user_id):
-    """Get pace analysis for a goal — shows in UI as adaptive indicator."""
     db = SessionLocal()
     try:
         history  = get_attempt_history(db, goal_id, user_id)

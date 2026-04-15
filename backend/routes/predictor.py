@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
+from groq_client import get_groq_client   # ← CHANGED: shared pool
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -37,24 +38,24 @@ def predict(user_id):
         positive  = sum(1 for e in emotions if e in ("positive","happy","great","amazing","motivated","excited","calm","good"))
         negative  = sum(1 for e in emotions if e in ("negative","stressed","anxious","sad","awful","bad","angry","tired"))
 
-        jmoods    = [j[0] for j in journals if j[0]]
-        j_pos     = sum(1 for m in jmoods if m in ("positive","happy","great","amazing","good"))
-        j_neg     = sum(1 for m in jmoods if m in ("negative","sad","awful","bad","tough","stressed"))
+        jmoods = [j[0] for j in journals if j[0]]
+        j_pos  = sum(1 for m in jmoods if m in ("positive","happy","great","amazing","good"))
+        j_neg  = sum(1 for m in jmoods if m in ("negative","sad","awful","bad","tough","stressed"))
 
-        cmoods    = [c[0] for c in checkins if c[0]]
-        c_pos     = sum(1 for m in cmoods if m in ("amazing","happy","okay","good","great","motivated","calm","excited"))
-        c_neg     = sum(1 for m in cmoods if m in ("sad","stressed","anxious","tired","bad","awful","angry"))
+        cmoods = [c[0] for c in checkins if c[0]]
+        c_pos  = sum(1 for m in cmoods if m in ("amazing","happy","okay","good","great","motivated","calm","excited"))
+        c_neg  = sum(1 for m in cmoods if m in ("sad","stressed","anxious","tired","bad","awful","angry"))
 
-        tot_pos   = positive + j_pos + c_pos
-        tot_neg   = negative + j_neg + c_neg
-        signals   = tot_pos + tot_neg or 1
-        pct       = round((tot_pos / signals) * 100)
+        tot_pos = positive + j_pos + c_pos
+        tot_neg = negative + j_neg + c_neg
+        signals = tot_pos + tot_neg or 1
+        pct     = round((tot_pos / signals) * 100)
 
         print("[predictor] mood pct=" + str(pct) + " signals=" + str(signals))
 
         streak_bonus = 0
         try:
-            row = db.execute(sql_text(
+            row  = db.execute(sql_text(
                 "SELECT COUNT(DISTINCT DATE(created_at)) FROM check_ins WHERE user_id=:uid"
             ), {"uid": user_id}).fetchone()
             days = row[0] if row else 0
@@ -94,10 +95,9 @@ def predict(user_id):
                 tip        = "Break your goal into 3 smaller daily tasks to boost your success rate."
                 reason     = "Based on your " + str(pct) + "% positive mood rate across " + str(signals) + " signals"
 
-                # Try AI tip — fully optional, never crashes the function
+                # CHANGED: get_groq_client() — reuses shared connection pool
                 try:
-                    from groq import Groq
-                    client  = Groq(api_key=os.getenv("GROQ_API_KEY"))
+                    client  = get_groq_client()
                     context = (
                         "Goal: \"" + title + "\" category=" + category + "\n"
                         "Mood: " + str(pct) + "% positive (" + str(signals) + " signals)\n"

@@ -68,7 +68,19 @@ function Login({ onLoginSuccess, onBack }) {
   var [error,   setError]   = useState("");
   var [showPw,  setShowPw]  = useState(false);
 
+  // ── Read ?ref= from URL once on mount ─────────────────────────────────────
+  var refUserId = null;
+  try {
+    var urlParams = new URLSearchParams(window.location.search);
+    refUserId = urlParams.get("ref"); // e.g. "4" from ?ref=4&mode=signup
+  } catch(e) {}
+
+  // ── If ?mode=signup in URL, open register tab automatically ───────────────
   useEffect(function() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      if (params.get("mode") === "signup") setMode("register");
+    } catch(e) {}
     delete axios.defaults.headers.common["X-Requested-With"];
   }, []);
 
@@ -80,11 +92,29 @@ function Login({ onLoginSuccess, onBack }) {
     var payload = mode === "register"
       ? { email:email.trim().toLowerCase(), password, name:name.trim()||"User" }
       : { email:email.trim().toLowerCase(), password };
+
     axios.post(API + ep, payload)
       .then(function(res) {
         var { token, user } = res.data;
         if (token) localStorage.setItem("token", token);
         localStorage.setItem("user", JSON.stringify(user));
+
+        // ── INVITE JOIN: fire-and-forget when new user signs up via referral link
+        if (mode === "register" && refUserId && user && user.id
+            && String(refUserId) !== String(user.id)) {
+          fetch(API + "/invite/join", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              new_user_id: user.id,
+              ref_user_id: parseInt(refUserId, 10),
+            }),
+          })
+          .then(function(r) { return r.json(); })
+          .then(function(data) { console.log("[Invite join]", data.message); })
+          .catch(function(err) { console.warn("[Invite join] non-critical:", err); });
+        }
+
         onLoginSuccess(user);
       })
       .catch(function(err) {
@@ -226,11 +256,9 @@ function Login({ onLoginSuccess, onBack }) {
           )}
         </div>
 
-
       </div>
     </div>
   );
 }
 
 export default Login;
-

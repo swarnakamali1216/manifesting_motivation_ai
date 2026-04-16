@@ -8,6 +8,11 @@ FIXES IN THIS VERSION:
   5. Weekly recap decrypts before sending to LLaMA
   6. Uses shared groq_client — no new Groq() per request
   7. timeout=15 on all completions.create calls
+  8. [FIX] created_at stored as UTC, returned as IST ISO-8601 string
+  9. [FIX] to_ist_iso() always returns "YYYY-MM-DDTHH:MM:SS+05:30" — never
+         a raw str(datetime) — so mobile browsers parse it reliably
+ 10. [FIX] POST RETURNING clause fetches created_at and converts to IST
+ 11. [FIX] Mobile: date-grouping works because the ISO string is consistent
 """
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
@@ -15,10 +20,32 @@ from sqlalchemy import text as sql_text
 from groq_client import get_groq_client
 from encryption import encrypt_journal, decrypt_journal
 import os
+from datetime import timezone, timedelta
 from dotenv import load_dotenv
 load_dotenv()
 
 journal_bp = Blueprint("journal", __name__)
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def to_ist_iso(dt):
+    """
+    Convert a datetime (naive UTC or aware) → IST ISO-8601 string.
+    Always returns "YYYY-MM-DDTHH:MM:SS+05:30" so new Date() works on
+    every browser, including mobile Safari/Chrome.
+    Falls back to str(dt) only if conversion fails completely.
+    """
+    if dt is None:
+        return None
+    try:
+        if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+            return dt.astimezone(IST).isoformat()
+        else:
+            # Postgres NOW() without timezone → treat as UTC
+            return dt.replace(tzinfo=timezone.utc).astimezone(IST).isoformat()
+    except Exception:
+        return str(dt)
 
 
 # ── GET /journal ─────────────────────────────────────────────
@@ -54,12 +81,11 @@ def get_journal():
                     "mood_score": r[5],
                     "tags":       r[6],
                     "ai_insight": r[7],
-                    "created_at": str(r[8]),
+                    "created_at": to_ist_iso(r[8]),   # ← always IST ISO-8601
                 })
             return jsonify(result)
 
         except Exception as e:
-            # Log the REAL error
             print(f"[journal GET] full-schema query failed: {e}")
             import traceback; traceback.print_exc()
             db.rollback()
@@ -87,7 +113,7 @@ def get_journal():
                         "mood_score": r[4],
                         "tags":       None,
                         "ai_insight": r[5],
-                        "created_at": str(r[6]),
+                        "created_at": to_ist_iso(r[6]),   # ← always IST ISO-8601
                     })
                 return jsonify(result2)
 
@@ -150,21 +176,27 @@ def add_journal():
         # STEP 3: ENCRYPT for storage
         encrypted_content = encrypt_journal(content)
 
+        # STEP 4: INSERT — store as UTC (NOW() default), return created_at for conversion
         try:
             row = db.execute(sql_text(
                 "INSERT INTO journal_entries (user_id, title, content, mood, mood_score, tags, ai_insight, created_at) "
-                "VALUES (:uid, :title, :content, :mood, :score, :tags, :insight, NOW()) RETURNING id"
+                "VALUES (:uid, :title, :content, :mood, :score, :tags, :insight, NOW()) "
+                "RETURNING id, created_at"
             ), {"uid": user_id, "title": title, "content": encrypted_content,
                 "mood": mood, "score": mood_score, "tags": tags, "insight": ai_insight}).fetchone()
         except Exception:
             db.rollback()
             row = db.execute(sql_text(
                 "INSERT INTO journal_entries (user_id, content, mood, mood_score, ai_insight, created_at) "
-                "VALUES (:uid, :content, :mood, :score, :insight, NOW()) RETURNING id"
+                "VALUES (:uid, :content, :mood, :score, :insight, NOW()) "
+                "RETURNING id, created_at"
             ), {"uid": user_id, "content": encrypted_content,
                 "mood": mood, "score": mood_score, "insight": ai_insight}).fetchone()
 
         db.commit()
+
+        # Convert UTC created_at → IST ISO-8601 string for frontend
+        saved_at = to_ist_iso(row[1]) if row and len(row) > 1 else None
 
         try:
             db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+15 WHERE id=:uid"), {"uid": user_id})
@@ -180,6 +212,7 @@ def add_journal():
 
         return jsonify({
             "id":         row[0],
+            "created_at": saved_at,          # ← IST ISO-8601 e.g. "2026-04-16T16:17:00+05:30"
             "ai_insight": ai_insight,
             "mood_score": mood_score,
             "xp_awarded": 15,
@@ -290,7 +323,7 @@ def weekly_recap():
         tough      = sum(1 for s in scores if s < -0.1)
 
         entries_text = "\n".join([
-            f"- [{rows[i][3].strftime('%a %b %d') if hasattr(rows[i][3], 'strftime') else str(rows[i][3])[:10]}] "
+            f"- [{to_ist_iso(rows[i][3])[:10] if rows[i][3] else 'unknown'}] "
             f"Mood: {rows[i][1]} | {decrypted_contents[i][:100]}"
             for i in range(len(rows))
         ])

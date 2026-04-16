@@ -11,7 +11,8 @@ function InviteTab({ user }) {
   var [result,      setResult]      = useState(null);
   var [copied,      setCopied]      = useState(false);
 
-  var inviteLink = window.location.origin + "?ref=" + (user && user.id ? user.id : "") + "&mode=signup";
+  var refId      = user && user.id ? String(user.id) : "";
+  var inviteLink = "https://manifesting-motivation-ai.vercel.app/?ref=" + refId + "&mode=signup";
 
   function copyLink() {
     navigator.clipboard.writeText(inviteLink)
@@ -34,18 +35,21 @@ function InviteTab({ user }) {
     setSending(true);
     setResult(null);
 
+    // ref_id is sent separately so the EmailJS template can build
+    // the URL itself — avoids email clients mangling ?ref=4&mode=signup
     emailjs.send(
       EMAILJS_SERVICE_ID,
       EMAILJS_TEMPLATE_ID,
       {
         sender_name: user && user.name ? user.name : "A friend",
-        invite_url:  inviteLink,
+        invite_url:  inviteLink,   // kept as fallback
+        ref_id:      refId,        // ← used by template to build clean URL
         to_email:    trimmed,
       },
       EMAILJS_PUBLIC_KEY
     )
     .then(function() {
-      setResult({ ok: true, msg: "Invite sent to " + trimmed + " - they will see it in their inbox!" });
+      setResult({ ok: true, msg: "Invite sent to " + trimmed + " — they will see it in their inbox!" });
       setFriendEmail("");
     })
     .catch(function(err) {

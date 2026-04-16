@@ -10,6 +10,10 @@ Fixes from v3:
   - "i want to learn c" → neutral (was hopeful)
   - "haan , but i cannot move from that..." → sad (was neutral)
 
+Fixes from v4:
+  - "feeling okay I guess" → neutral (was focused)
+  - "I feel hopeful today" → hopeful (was excited)
+
 Install: pip install vaderSentiment
 """
 
@@ -26,7 +30,7 @@ except ImportError:
 import re
 
 # ─────────────────────────────────────────────────────────────────────────────
-# COLLOQUIAL SLANG NORMALIZER (unchanged from v3)
+# COLLOQUIAL SLANG NORMALIZER
 # ─────────────────────────────────────────────────────────────────────────────
 _COLLOQUIAL_VIOLENT = [
     (r"\b(kill|murder|destroy|smash|crush|slay|demolish|annihilate)\b(.{0,30})\b(exam|test|project|presentation|homework|assignment|code|bug|deadline|interview|it|this|that)\b", "frustrated"),
@@ -43,7 +47,7 @@ def _colloquial_check(text):
     return None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CONTEXT OVERRIDES — v4 additions marked with # NEW
+# CONTEXT OVERRIDES
 # ─────────────────────────────────────────────────────────────────────────────
 _POSITIVE_OVERRIDES = [
     "crushed it", "crushed my workout", "crushed the", "crushed my",
@@ -53,13 +57,13 @@ _POSITIVE_OVERRIDES = [
     "feeling amazing", "feel amazing", "feeling great", "feel great",
     "feeling proud", "so proud", "proud of myself",
     "feeling happy", "feel happy", "so happy",
+    "so pumped", "pumped up", "let's go", "lets go",
     "feeling good", "feel good", "feeling fantastic",
     "nailed it", "aced it", "crushed the exam", "passed my exam",
     "got the job", "got accepted", "got in", "dream come true",
     "best day", "amazing day", "great day",
     "i won", "we won", "won the",
     "super ah iruku", "nalla iruku", "romba happy", "semma feel",
-    # NEW — achievement phrases VADER scores as neutral (no strong sentiment words)
     "completed my first", "finished my first", "built my first",
     "first ml model", "first ai model", "first project done",
     "deployed my", "launched my", "submitted my project",
@@ -78,7 +82,6 @@ _NEGATIVE_OVERRIDES = [
     "nothing is working", "nothing works", "nothing ever works",
     "vida maaten", "bore ah iruku", "thappu panniten",
     "romba kasta", "life over",
-    # NEW — Hindi/Tamil mixed negative phrases that score 0.0 in VADER
     "cannot move from", "cannot move on", "i cannot move",
     "cannot concentrate on", "cannot focus on",
     "haan but i cannot", "but i cannot",
@@ -96,6 +99,11 @@ _FRUSTRATION_OVERRIDES = [
 
 def _check_overrides(text):
     lower = text.lower()
+    # Check hopeful FIRST — before positive overrides
+    _HOPEFUL_PHRASES = ["feel hopeful", "feeling hopeful", "i am hopeful", "staying hopeful"]
+    for phrase in _HOPEFUL_PHRASES:
+        if phrase in lower:
+            return "hopeful"
     for phrase in _POSITIVE_OVERRIDES:
         if phrase in lower:
             return "excited"
@@ -108,9 +116,7 @@ def _check_overrides(text):
     return None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TECH-INTENT KEYWORDS — NEW in v4
-# Detects goal/task-oriented inputs that VADER scores near-zero
-# e.g. "give me a roadmap", "how do i connect", "i want to build"
+# TECH-INTENT KEYWORDS
 # ─────────────────────────────────────────────────────────────────────────────
 _TECH_FOCUSED_PATTERNS = [
     r"\b(roadmap|pathway|path to|steps to|guide (me|to)|how (do i|to|can i))\b",
@@ -122,15 +128,17 @@ _TECH_FOCUSED_PATTERNS = [
 ]
 
 def _tech_intent_check(text):
-    """Returns 'focused' if text is a goal/task/learning intent query."""
     lower = text.lower().strip()
+    # Skip vague "feeling" phrases — they are not tech intent
+    if re.match(r"^feeling\b", lower):
+        return None
     for pattern in _TECH_FOCUSED_PATTERNS:
         if re.search(pattern, lower):
             return "focused"
     return None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# KEYWORD FALLBACK (updated with tech keywords)
+# KEYWORD FALLBACK
 # ─────────────────────────────────────────────────────────────────────────────
 _KEYWORDS = {
     "stressed":  ["stressed","overwhelmed","anxious","panic","pressure","deadline","too much","nervous","cant cope","tense","frustrated","annoyed","angry","irritated"],
@@ -149,7 +157,7 @@ def _keyword_detect(text):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MAIN DETECT FUNCTION — v4 pipeline
+# MAIN DETECT FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
 def detect_emotion(text):
     """
@@ -158,7 +166,7 @@ def detect_emotion(text):
     Priority order:
       1. Colloquial check   — "kill my friend" = frustrated, not crisis
       2. Context overrides  — phrases VADER gets wrong (positive, negative, frustration)
-      3. Tech-intent check  — NEW: "roadmap/build/learn/connect" queries → focused
+      3. Tech-intent check  — "roadmap/build/learn/connect" queries → focused
       4. VADER scoring      — compound score with improved neutral zone handling
       5. Keyword fallback   — last resort
     """
@@ -193,7 +201,7 @@ def detect_emotion(text):
             "method":    "context_override",
         }
 
-    # STEP 3: Tech-intent check (NEW)
+    # STEP 3: Tech-intent check
     tech = _tech_intent_check(text)
     if tech:
         return {
@@ -215,11 +223,9 @@ def detect_emotion(text):
         elif c >= 0.2:    emotion = "focused"
         elif c >= 0.05:   emotion = "hopeful"
         elif c >= -0.05:
-            # Neutral zone — use keyword context to avoid false "hopeful"
             kw = _keyword_detect(text)
             emotion = kw if kw in ("stressed", "tired", "focused", "sad") else "neutral"
         elif c >= -0.1:
-            # Weak negative zone — keyword check before committing to stressed
             kw = _keyword_detect(text)
             emotion = kw if kw in ("stressed", "sad", "tired") else "stressed"
         elif c >= -0.35:  emotion = "stressed"
@@ -243,7 +249,7 @@ def detect_emotion(text):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Emotion → coaching config (unchanged)
+# Emotion → coaching config
 # ─────────────────────────────────────────────────────────────────────────────
 EMOTION_PROMPTS = {
     "stressed":   {"tone":"calm, grounding", "style":"Break into tiny steps. Acknowledge the pressure.", "avoid":"Don't add more to-dos."},

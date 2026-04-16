@@ -9,7 +9,7 @@ safety_bp = Blueprint("safety", __name__)
 
 # ── CRISIS / SELF-HARM KEYWORDS ───────────────────────────────────────────────
 CRISIS_KEYWORDS = [
-    "suicide","suicidal","kill myself","killing myself","end my life","end it all",
+    "suicide","suicidal","kill myself","killing myself","end my life","end it all","ending it all",
     "take my life","take my own life","want to die","wanna die","wish i was dead",
     "wish i were dead","better off dead","better off without me","no reason to live",
     "no point in living","not worth living","life is not worth","not worth it anymore",

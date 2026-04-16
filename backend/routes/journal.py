@@ -1,14 +1,20 @@
 """
-routes/journal.py
-FIXES:
-  1. Uses shared groq_client.get_groq_client() — no new Groq() per module/request
-  2. timeout=15 on all completions.create calls
-  3. title and tags columns handled with fallback
+routes/journal.py — WITH AES-256-GCM ENCRYPTION
+FIXES APPLIED:
+  1. encrypt_journal / decrypt_journal wired in correctly
+  2. VADER runs on PLAINTEXT (before encrypt) — mood score stays accurate
+  3. AI insight prompt uses PLAINTEXT (before encrypt) — LLaMA gets real text
+  4. Weekly recap decrypts content before sending to LLaMA
+  5. GET route decrypts before returning to frontend
+  6. PUT route re-encrypts updated content
+  7. Uses shared groq_client.get_groq_client() — no new Groq() per request
+  8. timeout=15 on all completions.create calls
 """
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
-from groq_client import get_groq_client   # ← CHANGED: shared pool
+from groq_client import get_groq_client
+from encryption import encrypt_journal, decrypt_journal   # ← ADDED
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -33,7 +39,7 @@ def get_journal():
             "id":         r[0],
             "user_id":    r[1],
             "title":      r[2],
-            "content":    r[3],
+            "content":    decrypt_journal(r[3]),   # ← DECRYPT before sending to frontend
             "mood":       r[4],
             "mood_score": r[5],
             "tags":       r[6],
@@ -51,7 +57,7 @@ def get_journal():
                 "id":         r[0],
                 "user_id":    r[1],
                 "title":      None,
-                "content":    r[2],
+                "content":    decrypt_journal(r[2]),   # ← DECRYPT here too
                 "mood":       r[3],
                 "mood_score": r[4],
                 "tags":       None,
@@ -69,7 +75,7 @@ def get_journal():
 def add_journal():
     data    = request.get_json() or {}
     user_id = data.get("user_id")
-    content = (data.get("content") or "").strip()
+    content = (data.get("content") or "").strip()   # ← plaintext from frontend
     mood    = data.get("mood", "okay")
     title   = data.get("title", "")
     tags    = data.get("tags", "")
@@ -81,6 +87,8 @@ def add_journal():
     try:
         db = SessionLocal()
 
+        # ── STEP 1: VADER on PLAINTEXT ──────────────────────────
+        # Must run BEFORE encrypt — ciphertext would give wrong score
         mood_score = 0.0
         try:
             from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
@@ -89,7 +97,8 @@ def add_journal():
         except Exception:
             pass
 
-        # CHANGED: get_groq_client() — reuses shared connection pool
+        # ── STEP 2: AI insight on PLAINTEXT ─────────────────────
+        # Must run BEFORE encrypt — LLaMA needs real text, not ciphertext
         ai_insight = None
         try:
             client = get_groq_client()
@@ -107,19 +116,23 @@ def add_journal():
         except Exception as e:
             print(f"[journal AI insight] {e}")
 
+        # ── STEP 3: ENCRYPT content for storage ─────────────────
+        # Only the DB-stored value is encrypted — plaintext never reaches disk
+        encrypted_content = encrypt_journal(content)   # ← ENCRYPT here
+
         try:
             row = db.execute(sql_text(
                 "INSERT INTO journal_entries (user_id, title, content, mood, mood_score, tags, ai_insight, created_at) "
                 "VALUES (:uid, :title, :content, :mood, :score, :tags, :insight, NOW()) RETURNING id"
-            ), {"uid": user_id, "title": title, "content": content, "mood": mood,
-                "score": mood_score, "tags": tags, "insight": ai_insight}).fetchone()
+            ), {"uid": user_id, "title": title, "content": encrypted_content,   # ← store encrypted
+                "mood": mood, "score": mood_score, "tags": tags, "insight": ai_insight}).fetchone()
         except Exception:
             db.rollback()
             row = db.execute(sql_text(
                 "INSERT INTO journal_entries (user_id, content, mood, mood_score, ai_insight, created_at) "
                 "VALUES (:uid, :content, :mood, :score, :insight, NOW()) RETURNING id"
-            ), {"uid": user_id, "content": content, "mood": mood,
-                "score": mood_score, "insight": ai_insight}).fetchone()
+            ), {"uid": user_id, "content": encrypted_content,   # ← store encrypted
+                "mood": mood, "score": mood_score, "insight": ai_insight}).fetchone()
 
         db.commit()
 
@@ -155,24 +168,28 @@ def add_journal():
 @journal_bp.route("/journal/<int:entry_id>", methods=["PUT"])
 def update_journal(entry_id):
     data    = request.get_json() or {}
-    content = (data.get("content") or "").strip()
+    content = (data.get("content") or "").strip()   # ← plaintext from frontend
     mood    = data.get("mood", "okay")
     title   = data.get("title", "")
     tags    = data.get("tags", "")
     if not content:
         return jsonify({"error": "content required"}), 400
+
+    # ── ENCRYPT updated content before saving ────────────────
+    encrypted_content = encrypt_journal(content)   # ← ENCRYPT here
+
     db = None
     try:
         db = SessionLocal()
         try:
             db.execute(sql_text(
                 "UPDATE journal_entries SET content=:c, mood=:m, title=:t, tags=:tags WHERE id=:id"
-            ), {"c": content, "m": mood, "t": title, "tags": tags, "id": entry_id})
+            ), {"c": encrypted_content, "m": mood, "t": title, "tags": tags, "id": entry_id})
         except Exception:
             db.rollback()
             db.execute(sql_text(
                 "UPDATE journal_entries SET content=:c, mood=:m WHERE id=:id"
-            ), {"c": content, "m": mood, "id": entry_id})
+            ), {"c": encrypted_content, "m": mood, "id": entry_id})
         db.commit()
         return jsonify({"message": "Updated!"})
     except Exception as e:
@@ -229,13 +246,19 @@ def weekly_recap():
         avg_mood   = round(sum(scores) / len(scores), 2) if scores else 0
         moods      = [r[1] for r in rows if r[1]]
         top_mood   = max(set(moods), key=moods.count) if moods else "neutral"
-        word_count = sum(len((r[0] or "").split()) for r in rows)
+
+        # ── DECRYPT content before sending to LLaMA ─────────────
+        # Must decrypt here — DB stores ciphertext, LLaMA needs real text
+        decrypted_contents = [decrypt_journal(r[0] or "") for r in rows]   # ← DECRYPT
+
+        word_count = sum(len(c.split()) for c in decrypted_contents)
         positive   = sum(1 for s in scores if s > 0.1)
         tough      = sum(1 for s in scores if s < -0.1)
 
         entries_text = "\n".join([
-            f"- [{r[3].strftime('%a %b %d') if hasattr(r[3], 'strftime') else str(r[3])[:10]}] Mood: {r[1]} | {(r[0] or '')[:100]}"
-            for r in rows
+            f"- [{rows[i][3].strftime('%a %b %d') if hasattr(rows[i][3], 'strftime') else str(rows[i][3])[:10]}] "
+            f"Mood: {rows[i][1]} | {decrypted_contents[i][:100]}"   # ← use decrypted
+            for i in range(len(rows))
         ])
 
         recap_text = (
@@ -244,7 +267,6 @@ def weekly_recap():
             f"Keep reflecting — every entry builds self-awareness."
         )
 
-        # CHANGED: get_groq_client() — reuses shared connection pool
         try:
             client = get_groq_client()
             resp = client.chat.completions.create(

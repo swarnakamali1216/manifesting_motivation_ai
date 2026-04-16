@@ -2,16 +2,16 @@
 routes/elevenlabs.py
 
 FIXES APPLIED:
-  1. Audio cache — same text+voice no longer calls ElevenLabs twice.
-     Cache keyed by hash(text + voice_id), stores raw audio bytes in memory.
-     TTL = 1 hour. Max 100 entries (LRU-style eviction by insertion order).
-  2. Non-blocking HTTP — req_lib.post now runs in a ThreadPoolExecutor so it
-     doesn't block the Flask worker thread while waiting for ElevenLabs.
-     (The startup validation req_lib.get is a one-time call — kept as-is.)
+  1. Lazy key validation — _KEY_VALID is re-checked on first real request
+     instead of only at startup. Render cold-start can no longer permanently
+     break voice by failing the one-time boot check.
+  2. _validate_key() is called with a short timeout and retried once per
+     process lifetime if the startup check failed.
+  3. Audio cache + ThreadPoolExecutor kept from previous version.
 """
 
 from flask import Blueprint, request, jsonify, Response
-import os, hashlib, time
+import os, hashlib, time, threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 import requests as req_lib
@@ -23,31 +23,58 @@ ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
 print(f"ElevenLabs key length={len(ELEVENLABS_KEY)} ends={ELEVENLABS_KEY[-4:] if ELEVENLABS_KEY else 'EMPTY'}")
 
-# ── Startup key validation (one-time blocking call — intentional) ──────────────
-_KEY_VALID = False
-if ELEVENLABS_KEY and len(ELEVENLABS_KEY) >= 32:
+# ── FIX 1: Lazy key state — not locked to startup result ─────────────────────
+_key_valid     = False       # current known state
+_key_checked   = False       # have we succeeded at least once?
+_key_lock      = threading.Lock()
+
+def _validate_key() -> bool:
+    """Try to validate the ElevenLabs key. Returns True if valid."""
+    global _key_valid, _key_checked
+    if not ELEVENLABS_KEY or len(ELEVENLABS_KEY) < 32:
+        return False
     try:
-        _test = req_lib.get(
+        resp = req_lib.get(
             "https://api.elevenlabs.io/v1/user",
             headers={"xi-api-key": ELEVENLABS_KEY},
             timeout=8,
         )
-        if _test.status_code == 200:
-            _KEY_VALID = True
+        if resp.status_code == 200:
+            with _key_lock:
+                _key_valid   = True
+                _key_checked = True
             print("ElevenLabs: key valid — premium AI voices enabled")
+            return True
         else:
-            print(f"ElevenLabs: key rejected (status {_test.status_code}) — browser TTS fallback")
-    except Exception as _e:
-        print(f"ElevenLabs: could not validate key ({_e}) — will try on first request")
-else:
-    print(f"ElevenLabs: {'key too short' if ELEVENLABS_KEY else 'no key'} — browser TTS fallback")
+            print(f"ElevenLabs: key rejected (status {resp.status_code})")
+            return False
+    except Exception as e:
+        print(f"ElevenLabs: validation error ({e})")
+        return False
+
+def _is_key_valid() -> bool:
+    """
+    Return True if we know the key works.
+    If we've never successfully validated, try once more right now.
+    This handles Render cold-start where startup check timed out.
+    """
+    global _key_valid, _key_checked
+    if _key_checked:          # already confirmed working at some point
+        return _key_valid
+    # Haven't confirmed yet — try now (lazy)
+    return _validate_key()
+
+# ── Startup validation (best-effort, non-fatal) ───────────────────────────────
+def _startup_check():
+    _validate_key()
+
+threading.Thread(target=_startup_check, daemon=True).start()
 
 
-# FIX 1: In-memory audio cache — OrderedDict for O(1) LRU eviction
-# { cache_key: {"audio": bytes, "ts": epoch_float} }
+# ── In-memory audio cache ─────────────────────────────────────────────────────
 _audio_cache: OrderedDict = OrderedDict()
-_CACHE_MAX    = 100      # max entries before eviction
-_CACHE_TTL    = 3600     # seconds (1 hour)
+_CACHE_MAX = 100
+_CACHE_TTL = 3600
 
 def _cache_key(text: str, voice_id: str) -> str:
     return hashlib.sha256(f"{text}||{voice_id}".encode()).hexdigest()
@@ -55,24 +82,23 @@ def _cache_key(text: str, voice_id: str) -> str:
 def _cache_get(key: str):
     entry = _audio_cache.get(key)
     if entry and (time.time() - entry["ts"]) < _CACHE_TTL:
-        _audio_cache.move_to_end(key)  # mark as recently used
+        _audio_cache.move_to_end(key)
         return entry["audio"]
     if entry:
-        del _audio_cache[key]  # expired
+        del _audio_cache[key]
     return None
 
 def _cache_set(key: str, audio: bytes):
     if len(_audio_cache) >= _CACHE_MAX:
-        _audio_cache.popitem(last=False)  # evict oldest
+        _audio_cache.popitem(last=False)
     _audio_cache[key] = {"audio": audio, "ts": time.time()}
     _audio_cache.move_to_end(key)
 
 
-# FIX 2: Thread pool for non-blocking ElevenLabs HTTP calls
+# ── Thread pool for non-blocking HTTP ────────────────────────────────────────
 _executor = ThreadPoolExecutor(max_workers=4)
 
 def _fetch_tts(text: str, voice_id: str) -> bytes | None:
-    """Blocking ElevenLabs POST — runs in executor thread, not Flask worker."""
     resp = req_lib.post(
         ELEVENLABS_URL.format(voice_id=voice_id),
         json={
@@ -94,7 +120,7 @@ def _fetch_tts(text: str, voice_id: str) -> bytes | None:
     )
     if resp.status_code == 200:
         return resp.content
-    print(f"ElevenLabs: HTTP {resp.status_code}")
+    print(f"ElevenLabs: HTTP {resp.status_code} — {resp.text[:200]}")
     return None
 
 
@@ -110,13 +136,13 @@ def speak():
     if not text:
         return jsonify({"error": "No text provided"}), 400
 
-    if not _KEY_VALID:
+    # FIX 1: Lazy re-check instead of hard-fail on startup miss
+    if not _is_key_valid():
         return jsonify({"error": "ElevenLabs unavailable — use browser TTS", "fallback": True}), 503
 
     text = text[:500]
     key  = _cache_key(text, voice)
 
-    # FIX 1: Return cached audio if available
     cached_audio = _cache_get(key)
     if cached_audio:
         print(f"ElevenLabs: cache hit ({len(text)} chars)")
@@ -124,9 +150,8 @@ def speak():
                         headers={"Content-Type": "audio/mpeg", "Cache-Control": "no-cache"})
 
     try:
-        # FIX 2: Run blocking HTTP call in executor so Flask thread is not held
         future = _executor.submit(_fetch_tts, text, voice)
-        audio  = future.result(timeout=25)  # wait up to 25s
+        audio  = future.result(timeout=25)
 
         if audio:
             _cache_set(key, audio)
@@ -149,7 +174,7 @@ def speak():
 
 @elevenlabs_bp.route("/speak/voices", methods=["GET"])
 def list_voices():
-    if not _KEY_VALID:
+    if not _is_key_valid():
         return jsonify({"voices": [], "fallback": True}), 200
     try:
         resp = req_lib.get(

@@ -103,7 +103,7 @@ def _fetch_tts(text: str, voice_id: str) -> bytes | None:
         ELEVENLABS_URL.format(voice_id=voice_id),
         json={
             "text":     text,
-            "model_id": "eleven_monolingual_v1",
+            "model_id": "eleven_turbo_v2_5",
             "voice_settings": {
                 "stability":         0.5,
                 "similarity_boost":  0.75,

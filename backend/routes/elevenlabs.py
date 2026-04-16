@@ -11,8 +11,9 @@ FIXES APPLIED:
   4. FREE_VOICES whitelist — only free-tier ElevenLabs voices allowed.
      Any voice_id not in the whitelist falls back to Sarah automatically.
   5. _fetch_tts now uses the actual voice_id parameter (was hardcoded).
-  6. Default voice fixed from Bella (premium/402) to Sarah (free).
+  6. Default voice fixed to Sarah (21m00Tcm4TlvDq8ikWAM) — always free.
   7. Explicit 402 handling — retries with Sarah instead of returning 503.
+  8. Frontend voice IDs now match this whitelist exactly.
 """
 
 from flask import Blueprint, request, jsonify, Response
@@ -29,6 +30,7 @@ ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 print(f"ElevenLabs key length={len(ELEVENLABS_KEY)} ends={ELEVENLABS_KEY[-4:] if ELEVENLABS_KEY else 'EMPTY'}")
 
 # ── Free-tier voice whitelist ─────────────────────────────────────────────────
+# These IDs must match VOICE_OPTIONS in frontend/src/pages/Settings.jsx
 FREE_VOICES: dict[str, dict] = {
     "21m00Tcm4TlvDq8ikWAM": {"name": "Sarah",   "style": "Warm & encouraging",  "gender": "female"},
     "pNInz6obpgDQGcFmaJgB": {"name": "Adam",    "style": "Neutral male",         "gender": "male"},
@@ -57,7 +59,7 @@ def _safe_voice_id(raw: str) -> str:
     return DEFAULT_VOICE_ID
 
 
-# ── FIX 1: Lazy key state — not locked to startup result ─────────────────────
+# ── Lazy key state — not locked to startup result ─────────────────────────────
 _key_valid   = False
 _key_checked = False
 _key_lock    = threading.Lock()
@@ -81,6 +83,8 @@ def _validate_key() -> bool:
             return True
         else:
             print(f"ElevenLabs: key rejected (status {resp.status_code})")
+            with _key_lock:
+                _key_checked = True
             return False
     except Exception as e:
         print(f"ElevenLabs: validation error ({e})")
@@ -126,11 +130,11 @@ _executor = ThreadPoolExecutor(max_workers=4)
 def _fetch_tts(text: str, voice_id: str) -> bytes | None:
     """
     Fetch TTS audio from ElevenLabs.
-    FIX: uses the actual voice_id parameter (was hardcoded to Sarah before).
-    FIX: explicit 402 handling — retries with Sarah instead of silent None.
+    Uses the actual voice_id parameter.
+    Explicit 402 handling — retries with Sarah instead of silent None.
     """
     resp = req_lib.post(
-        ELEVENLABS_URL.format(voice_id=voice_id),   # ← FIX: was hardcoded
+        ELEVENLABS_URL.format(voice_id=voice_id),
         json={
             "text":     text,
             "model_id": "eleven_turbo_v2_5",
@@ -174,7 +178,7 @@ def speak():
     data = request.get_json() or {}
     text = (data.get("text") or "").strip()
 
-    # FIX: default is now Sarah (free), not Bella (premium/402)
+    # Accept voice_id or voice_name, fall back to Sarah
     raw_voice = data.get("voice_id") or data.get("voice_name") or DEFAULT_VOICE_ID
     voice_id  = _safe_voice_id(raw_voice)
 

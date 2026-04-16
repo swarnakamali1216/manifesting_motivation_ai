@@ -1,149 +1,122 @@
 """
-encryption.py — AES-256-GCM Journal Encryption Service
-Place in: backend/encryption.py
+backend/encryption.py — AES-256-GCM journal encryption
 
-Uses AES-256-GCM (Galois/Counter Mode):
-  - True 256-bit AES key (matches paper claim)
-  - GCM provides built-in authentication (detects tampering)
-  - PBKDF2-SHA256 with 100,000 iterations for key derivation
+SETUP:
+  1. Generate a key (run once):
+       python -c "from cryptography.hazmat.primitives import keymaterial; import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
+     OR simpler:
+       python -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
 
-Install: pip install cryptography
+  2. Add to Render environment variables:
+       JOURNAL_ENCRYPTION_KEY=<the base64 string from above>
+
+  3. Add to your local .env:
+       JOURNAL_ENCRYPTION_KEY=<same key>
+
+  ⚠️  IMPORTANT: Use the SAME key on both local and Render.
+      If the key changes, old entries cannot be decrypted.
+
+INSTALL:
+  pip install cryptography
+
+SAFE FALLBACK:
+  If JOURNAL_ENCRYPTION_KEY is not set, encryption is skipped
+  and plaintext is stored. This means the app never crashes due
+  to a missing key — you just lose encryption until you set it.
+  A warning is printed so you know.
 """
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-import base64
+
 import os
+import base64
+from dotenv import load_dotenv
+load_dotenv()
 
-# ── Master encryption key ──────────────────────────────────────────────────────
-# MUST be set in .env — raises error if missing (never use a hardcoded fallback)
-_MASTER_KEY = os.environ.get("JOURNAL_ENCRYPTION_KEY")
-if not _MASTER_KEY:
-    # Fallback ONLY for local dev — remove this in production
-    import warnings
-    warnings.warn(
-        "JOURNAL_ENCRYPTION_KEY not set. Using dev fallback — "
-        "DO NOT use in production.",
-        stacklevel=2
-    )
-    _MASTER_KEY = "dev-only-fallback-key-not-for-production-2026"
+# ── Try to import cryptography ─────────────────────────────────────────────────
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    _CRYPTO_OK = True
+except ImportError:
+    _CRYPTO_OK = False
+    print("⚠️  cryptography package not installed — journal encryption disabled. Run: pip install cryptography")
 
-_SALT = b"manifesting_motivation_salt_2026"  # fixed salt — acceptable for project scope
+# ── Load key ───────────────────────────────────────────────────────────────────
+_raw_key = os.getenv("JOURNAL_ENCRYPTION_KEY", "").strip()
+_KEY: bytes | None = None
 
-
-def _derive_key() -> bytes:
-    """
-    Derive a true 256-bit AES key from master key using PBKDF2-SHA256.
-    All 32 bytes are used as the AES-256 key (unlike Fernet which splits them).
-    """
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,          # 32 bytes = 256 bits — full AES-256 key
-        salt=_SALT,
-        iterations=100_000,
-    )
-    return kdf.derive(_MASTER_KEY.encode("utf-8"))
-
-
-_AES_KEY = _derive_key()  # derive once on import
+if _raw_key and _CRYPTO_OK:
+    try:
+        decoded = base64.b64decode(_raw_key)
+        if len(decoded) != 32:
+            print(f"⚠️  JOURNAL_ENCRYPTION_KEY must be 32 bytes when decoded (got {len(decoded)}). Encryption disabled.")
+        else:
+            _KEY = decoded
+            print("✅ Journal encryption ready (AES-256-GCM)")
+    except Exception as e:
+        print(f"⚠️  JOURNAL_ENCRYPTION_KEY decode error: {e}. Encryption disabled.")
+else:
+    if not _raw_key:
+        print("⚠️  JOURNAL_ENCRYPTION_KEY not set — journal entries stored as plaintext. Set this env var to enable encryption.")
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def encrypt_journal(plaintext: str) -> str:
     """
-    Encrypt a journal entry using AES-256-GCM.
-    Returns base64-encoded string: nonce(12 bytes) + ciphertext + auth_tag.
-    Safe to store directly in the database TEXT column.
+    Encrypt a journal entry string.
+    Returns:  "enc:v1:<base64(nonce+ciphertext)>"
+    If key not set or crypto unavailable, returns plaintext unchanged.
     """
     if not plaintext:
         return plaintext
+    if not _KEY or not _CRYPTO_OK:
+        return plaintext   # graceful fallback — no crash
+
     try:
-        aesgcm = AESGCM(_AES_KEY)
-        nonce  = os.urandom(12)                          # 96-bit random nonce
+        aesgcm = AESGCM(_KEY)
+        nonce  = os.urandom(12)          # 96-bit nonce, unique per entry
         ct     = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
-        # Store as: base64(nonce + ciphertext+tag)
-        return base64.urlsafe_b64encode(nonce + ct).decode("utf-8")
+        blob   = base64.b64encode(nonce + ct).decode("ascii")
+        return f"enc:v1:{blob}"
     except Exception as e:
-        print(f"[encryption] encrypt error: {e}")
-        return plaintext  # fallback — never lose user data
+        print(f"[encrypt_journal] encryption failed, storing plaintext: {e}")
+        return plaintext   # never crash the save
 
 
-def decrypt_journal(ciphertext: str) -> str:
+def decrypt_journal(value: str) -> str:
     """
-    Decrypt a journal entry encrypted with AES-256-GCM.
-    Handles legacy plaintext entries gracefully (returns as-is).
-    """
-    if not ciphertext:
-        return ciphertext
-    try:
-        raw    = base64.urlsafe_b64decode(ciphertext + "==")
-        nonce  = raw[:12]                                # first 12 bytes = nonce
-        ct     = raw[12:]                               # rest = ciphertext + auth tag
-        aesgcm = AESGCM(_AES_KEY)
-        return aesgcm.decrypt(nonce, ct, None).decode("utf-8")
-    except Exception:
-        # Not encrypted (legacy plaintext entry) — return as-is
-        return ciphertext
+    Decrypt a journal entry string.
+    Handles:
+      - "enc:v1:<blob>"  → decrypt with AES-256-GCM
+      - anything else    → return as-is (plaintext or legacy entry)
 
-
-def is_encrypted(text: str) -> bool:
+    If decryption fails (wrong key, corrupt data), returns a safe
+    placeholder instead of crashing.
     """
-    Check whether a journal entry is AES-256-GCM encrypted.
-    Used by the migration function to skip already-encrypted entries.
-    """
-    if not text:
-        return False
-    try:
-        raw = base64.urlsafe_b64decode(text + "==")
-        if len(raw) < 28:   # nonce(12) + min ciphertext(1) + GCM tag(16) = 29
-            return False
-        nonce  = raw[:12]
-        ct     = raw[12:]
-        AESGCM(_AES_KEY).decrypt(nonce, ct, None)
-        return True
-    except Exception:
-        return False
+    if not value:
+        return value
 
+    # Not an encrypted entry — return as-is (legacy plaintext)
+    if not value.startswith("enc:v1:"):
+        return value
 
-def encrypt_existing_journals(db_session) -> dict:
-    """
-    One-time migration: encrypt all existing plaintext journal entries.
-    Safe to run multiple times — skips already-encrypted entries.
-    Call once via a protected admin/migration endpoint.
-    Returns stats dict.
-    """
-    from sqlalchemy import text as sql_text
-
-    encrypted_count = 0
-    skipped_count   = 0
+    if not _KEY or not _CRYPTO_OK:
+        # Key not available but entry is encrypted — return placeholder
+        # so the frontend doesn't crash showing raw ciphertext
+        return "[entry encrypted — JOURNAL_ENCRYPTION_KEY not configured on this server]"
 
     try:
-        rows = db_session.execute(
-            sql_text("SELECT id, content FROM journal_entries")
-        ).fetchall()
-
-        for row in rows:
-            entry_id = row[0]
-            content  = row[1]
-
-            if content and not is_encrypted(content):
-                encrypted = encrypt_journal(content)
-                db_session.execute(
-                    sql_text("UPDATE journal_entries SET content = :c WHERE id = :id"),
-                    {"c": encrypted, "id": entry_id}
-                )
-                encrypted_count += 1
-            else:
-                skipped_count += 1
-
-        db_session.commit()
-        return {
-            "success":   True,
-            "encrypted": encrypted_count,
-            "skipped":   skipped_count,
-            "message":   f"Encrypted {encrypted_count} entries, skipped {skipped_count} (already encrypted or empty)"
-        }
+        blob   = base64.b64decode(value[len("enc:v1:"):])
+        nonce  = blob[:12]
+        ct     = blob[12:]
+        aesgcm = AESGCM(_KEY)
+        plain  = aesgcm.decrypt(nonce, ct, None)
+        return plain.decode("utf-8")
     except Exception as e:
-        db_session.rollback()
-        return {"success": False, "error": str(e)}
+        print(f"[decrypt_journal] decryption failed: {e}")
+        # Don't crash the GET route — return a safe placeholder
+        return "[entry could not be decrypted — key mismatch or corrupt data]"
+
+
+def is_encryption_enabled() -> bool:
+    """Returns True if encryption is active (key loaded and crypto available)."""
+    return _KEY is not None and _CRYPTO_OK

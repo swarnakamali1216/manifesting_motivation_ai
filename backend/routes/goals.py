@@ -2,13 +2,16 @@
 routes/goals.py
 FIXES:
   1. get_groq() replaced with get_groq_client() — shared pool, no new Groq() per call
-  2. All other logic (URL safety, roadmap generation, adaptive steps) unchanged
+  2. completed_at column used instead of completed boolean in goal_steps
+     - get_goal_steps: SELECT completed_at, derive bool via `is not None`
+     - prove_step INSERT: completed_at=NOW() instead of completed=TRUE
+     - prove_step completion check: WHERE completed_at IS NOT NULL
 """
 
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
 from sqlalchemy import text as sql_text
-from groq_client import get_groq_client   # ← CHANGED: shared pool
+from groq_client import get_groq_client   # ← shared pool
 import os, json, math
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
@@ -18,7 +21,6 @@ goals_bp = Blueprint("goals", __name__)
 
 
 # ── Step count calculation ─────────────────────────────────────
-# goals.py — fix calc_step_count()
 def calc_step_count(timeline, daily_time, depth):
     days_map  = {"1 week":7, "2 weeks":14, "1 month":30, "3 months":90, "6 months":180}
     mins_map  = {"15 mins":15, "30 mins":30, "1 hour":60, "2+ hours":120}
@@ -27,7 +29,7 @@ def calc_step_count(timeline, daily_time, depth):
     mins  = mins_map.get(str(daily_time), 30)
     mult  = depth_map.get(str(depth), 1.0)
     count = math.ceil((days * mins * mult) / 60)
-    return max(3, min(50, count))  # was max(4, min(15, count))
+    return max(3, min(50, count))
 
 _SAFE_INDEX_DOMAINS = [
     "docs.python.org", "developer.mozilla.org", "react.dev", "dev.java",
@@ -190,7 +192,6 @@ JSON FORMAT:
 Generate {num_steps} steps now for: {title}"""
 
     try:
-        # CHANGED: get_groq_client() — reuses shared connection pool
         client = get_groq_client()
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -430,7 +431,6 @@ def prove_step(goal_id, step_index):
             goal_row   = db.execute(sql_text("SELECT title FROM goals WHERE id=:gid"), {"gid": goal_id}).fetchone()
             goal_title = goal_row[0] if goal_row else "your goal"
             try:
-                # CHANGED: get_groq_client() — reuses shared connection pool
                 client = get_groq_client()
                 resp = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
@@ -448,6 +448,7 @@ def prove_step(goal_id, step_index):
                 feedback = "Excellent work completing this step! Your effort is building real momentum — keep going."
                 passed   = True
 
+        # ── FIX 1: INSERT uses completed_at=NOW() instead of completed=TRUE ──
         try:
             existing = db.execute(sql_text(
                 "SELECT id FROM goal_steps WHERE goal_id=:gid AND step_index=:si"
@@ -455,14 +456,14 @@ def prove_step(goal_id, step_index):
 
             if existing:
                 db.execute(sql_text(
-                    "UPDATE goal_steps SET user_answer=:ans, ai_feedback=:fb, score=:sc "
+                    "UPDATE goal_steps SET completed_at=NOW(), user_answer=:ans, ai_feedback=:fb, score=:sc "
                     "WHERE goal_id=:gid AND step_index=:si"
                 ), {"ans": answer[:500], "fb": feedback, "sc": 100 if not skipped else 70,
                     "gid": goal_id, "si": step_index})
             else:
                 db.execute(sql_text(
-                    "INSERT INTO goal_steps (goal_id, user_id, step_index, completed, user_answer, ai_feedback, score) "
-                    "VALUES (:gid, :uid, :si, TRUE, :ans, :fb, :sc)"
+                    "INSERT INTO goal_steps (goal_id, user_id, step_index, completed_at, user_answer, ai_feedback, score) "
+                    "VALUES (:gid, :uid, :si, NOW(), :ans, :fb, :sc)"
                 ), {"gid": goal_id, "uid": user_id, "si": step_index,
                     "ans": answer[:500], "fb": feedback, "sc": 100 if not skipped else 70})
             db.commit()
@@ -470,6 +471,7 @@ def prove_step(goal_id, step_index):
             print(f"Step save error: {se}")
             db.rollback()
 
+        # ── FIX 2: completion check uses completed_at IS NOT NULL ─────────────
         goal_completed = False
         try:
             goal_row = db.execute(sql_text("SELECT roadmap FROM goals WHERE id=:gid"), {"gid": goal_id}).fetchone()
@@ -477,7 +479,7 @@ def prove_step(goal_id, step_index):
                 rm    = json.loads(goal_row[0]) if isinstance(goal_row[0], str) else goal_row[0]
                 total = len(rm.get("steps", [])) if isinstance(rm, dict) else len(rm)
                 done  = db.execute(sql_text(
-                    "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed=TRUE"
+                    "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed_at IS NOT NULL"
                 ), {"gid": goal_id}).fetchone()[0]
                 if total > 0 and done >= total:
                     db.execute(sql_text("UPDATE goals SET completed=TRUE, is_complete=TRUE WHERE id=:gid"), {"gid": goal_id})
@@ -524,7 +526,6 @@ def struggle_help(goal_id, step_index):
         step_title = roadmap[step_index]["title"] if step_index < len(roadmap) else f"Step {step_index+1}"
 
         try:
-            # CHANGED: get_groq_client() — reuses shared connection pool
             client = get_groq_client()
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -556,17 +557,23 @@ def struggle_help(goal_id, step_index):
 
 
 # ── GET /goals/<id>/steps ─────────────────────────────────────
+# ── FIX 3: SELECT completed_at, derive bool via `is not None` ─
 @goals_bp.route("/goals/<int:goal_id>/steps", methods=["GET"])
 def get_goal_steps(goal_id):
     db = SessionLocal()
     try:
         rows = db.execute(sql_text(
-            "SELECT step_index, completed, user_answer, ai_feedback, score "
+            "SELECT step_index, completed_at, user_answer, ai_feedback, score "
             "FROM goal_steps WHERE goal_id=:gid"
         ), {"gid": goal_id}).fetchall()
         result = {}
         for r in rows:
-            result[r[0]] = {"completed": bool(r[1]), "user_answer": r[2], "ai_feedback": r[3], "score": r[4]}
+            result[r[0]] = {
+                "completed":   r[1] is not None,   # completed_at IS NOT NULL → True
+                "user_answer": r[2],
+                "ai_feedback": r[3],
+                "score":       r[4],
+            }
         return jsonify(result)
     except Exception as e:
         print("Steps GET error:", e)
@@ -584,7 +591,7 @@ def complete_goal(goal_id):
         if not row:
             return jsonify({"error": "Goal not found"}), 404
         db.execute(sql_text("UPDATE goals SET completed=TRUE, is_complete=TRUE WHERE id=:gid"), {"gid": goal_id})
-        db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+50 WHERE id=:uid"), {"uid": row[0]})
+        db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+50 WHERE id=:uid"), {"uid": row[0]}),
         db.commit()
         return jsonify({"message": "Goal completed! +50 XP!"})
     except Exception as e:

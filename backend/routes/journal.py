@@ -9,10 +9,10 @@ FIXES IN THIS VERSION:
   6. Uses shared groq_client — no new Groq() per request
   7. timeout=15 on all completions.create calls
   8. [FIX] created_at stored as UTC, returned as IST ISO-8601 string
-  9. [FIX] to_ist_iso() always returns "YYYY-MM-DDTHH:MM:SS+05:30" — never
-         a raw str(datetime) — so mobile browsers parse it reliably
+  9. [FIX] to_ist_iso() always returns "YYYY-MM-DDTHH:MM:SS+05:30"
  10. [FIX] POST RETURNING clause fetches created_at and converts to IST
  11. [FIX] Mobile: date-grouping works because the ISO string is consistent
+ 12. [FIX] Auto-migration: adds title+tags columns if missing on startup
 """
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
@@ -29,12 +29,36 @@ journal_bp = Blueprint("journal", __name__)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
+# ── Auto-migration: add missing columns on startup ────────────────────────────
+def _migrate_journal_table():
+    """Adds title and tags columns to journal_entries if they don't exist."""
+    db = None
+    try:
+        db = SessionLocal()
+        db.execute(sql_text("""
+            ALTER TABLE journal_entries
+            ADD COLUMN IF NOT EXISTS title VARCHAR(300),
+            ADD COLUMN IF NOT EXISTS tags  TEXT
+        """))
+        db.commit()
+        print("✅ journal_entries columns verified (title, tags)")
+    except Exception as e:
+        if db:
+            db.rollback()
+        print(f"[journal migrate] {e}")
+    finally:
+        if db:
+            db.close()
+
+# Run migration at import time (safe — IF NOT EXISTS)
+_migrate_journal_table()
+
+
 def to_ist_iso(dt):
     """
     Convert a datetime (naive UTC or aware) → IST ISO-8601 string.
     Always returns "YYYY-MM-DDTHH:MM:SS+05:30" so new Date() works on
     every browser, including mobile Safari/Chrome.
-    Falls back to str(dt) only if conversion fails completely.
     """
     if dt is None:
         return None
@@ -42,7 +66,6 @@ def to_ist_iso(dt):
         if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
             return dt.astimezone(IST).isoformat()
         else:
-            # Postgres NOW() without timezone → treat as UTC
             return dt.replace(tzinfo=timezone.utc).astimezone(IST).isoformat()
     except Exception:
         return str(dt)
@@ -58,7 +81,7 @@ def get_journal():
     try:
         db = SessionLocal()
 
-        # Try full schema (with title/tags)
+        # Full schema query (title + tags present after migration)
         try:
             rows = db.execute(sql_text(
                 "SELECT id, user_id, title, content, mood, mood_score, tags, ai_insight, created_at "
@@ -81,7 +104,7 @@ def get_journal():
                     "mood_score": r[5],
                     "tags":       r[6],
                     "ai_insight": r[7],
-                    "created_at": to_ist_iso(r[8]),   # ← always IST ISO-8601
+                    "created_at": to_ist_iso(r[8]),
                 })
             return jsonify(result)
 
@@ -90,7 +113,7 @@ def get_journal():
             import traceback; traceback.print_exc()
             db.rollback()
 
-            # Fallback: try without title/tags columns
+            # Fallback without title/tags
             try:
                 rows2 = db.execute(sql_text(
                     "SELECT id, user_id, content, mood, mood_score, ai_insight, created_at "
@@ -113,7 +136,7 @@ def get_journal():
                         "mood_score": r[4],
                         "tags":       None,
                         "ai_insight": r[5],
-                        "created_at": to_ist_iso(r[6]),   # ← always IST ISO-8601
+                        "created_at": to_ist_iso(r[6]),
                     })
                 return jsonify(result2)
 
@@ -146,7 +169,7 @@ def add_journal():
     try:
         db = SessionLocal()
 
-        # STEP 1: VADER on PLAINTEXT (must be before encrypt)
+        # STEP 1: VADER on PLAINTEXT
         mood_score = 0.0
         try:
             from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
@@ -155,7 +178,7 @@ def add_journal():
         except Exception:
             pass
 
-        # STEP 2: AI insight on PLAINTEXT (must be before encrypt)
+        # STEP 2: AI insight on PLAINTEXT
         ai_insight = None
         try:
             client = get_groq_client()
@@ -176,7 +199,7 @@ def add_journal():
         # STEP 3: ENCRYPT for storage
         encrypted_content = encrypt_journal(content)
 
-        # STEP 4: INSERT — store as UTC (NOW() default), return created_at for conversion
+        # STEP 4: INSERT
         try:
             row = db.execute(sql_text(
                 "INSERT INTO journal_entries (user_id, title, content, mood, mood_score, tags, ai_insight, created_at) "
@@ -195,7 +218,6 @@ def add_journal():
 
         db.commit()
 
-        # Convert UTC created_at → IST ISO-8601 string for frontend
         saved_at = to_ist_iso(row[1]) if row and len(row) > 1 else None
 
         try:
@@ -212,7 +234,7 @@ def add_journal():
 
         return jsonify({
             "id":         row[0],
-            "created_at": saved_at,          # ← IST ISO-8601 e.g. "2026-04-16T16:17:00+05:30"
+            "created_at": saved_at,
             "ai_insight": ai_insight,
             "mood_score": mood_score,
             "xp_awarded": 15,
@@ -310,7 +332,6 @@ def weekly_recap():
         moods      = [r[1] for r in rows if r[1]]
         top_mood   = max(set(moods), key=moods.count) if moods else "neutral"
 
-        # DECRYPT before sending to LLaMA
         decrypted_contents = []
         for r in rows:
             try:

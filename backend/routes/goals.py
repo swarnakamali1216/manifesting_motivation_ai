@@ -6,6 +6,9 @@ FIXES:
      - get_goal_steps: SELECT completed_at, derive bool via `is not None`
      - prove_step INSERT: completed_at=NOW() instead of completed=TRUE
      - prove_step completion check: WHERE completed_at IS NOT NULL
+  3. ensure_columns() runs at import time — auto-adds missing goal_steps columns
+     (user_answer, ai_feedback, score, completed_at, user_id) so the app
+     self-heals without a manual migration step.
 """
 
 from flask import Blueprint, request, jsonify
@@ -18,6 +21,37 @@ from dotenv import load_dotenv
 load_dotenv()
 
 goals_bp = Blueprint("goals", __name__)
+
+
+# ── Auto-migration: add any missing goal_steps columns ────────
+def ensure_columns():
+    """
+    Runs at startup. Uses ADD COLUMN IF NOT EXISTS so it is safe to
+    call every time and will never fail on a column that already exists.
+    """
+    needed = [
+        "ALTER TABLE goal_steps ADD COLUMN IF NOT EXISTS user_answer  TEXT;",
+        "ALTER TABLE goal_steps ADD COLUMN IF NOT EXISTS ai_feedback  TEXT;",
+        "ALTER TABLE goal_steps ADD COLUMN IF NOT EXISTS score        INTEGER DEFAULT 100;",
+        "ALTER TABLE goal_steps ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;",
+        "ALTER TABLE goal_steps ADD COLUMN IF NOT EXISTS user_id      INTEGER;",
+    ]
+    db = SessionLocal()
+    try:
+        for stmt in needed:
+            try:
+                db.execute(sql_text(stmt))
+            except Exception:
+                db.rollback()   # one column failing must not block the rest
+        db.commit()
+        print("✅ goal_steps columns verified (auto-migration OK)")
+    except Exception as e:
+        print(f"⚠️  ensure_columns warning: {e}")
+    finally:
+        db.close()
+
+# Run immediately when this module is imported
+ensure_columns()
 
 
 # ── Step count calculation ─────────────────────────────────────
@@ -448,7 +482,7 @@ def prove_step(goal_id, step_index):
                 feedback = "Excellent work completing this step! Your effort is building real momentum — keep going."
                 passed   = True
 
-        # ── FIX 1: INSERT uses completed_at=NOW() instead of completed=TRUE ──
+        # ── INSERT / UPDATE goal_steps row ────────────────────────────────────
         try:
             existing = db.execute(sql_text(
                 "SELECT id FROM goal_steps WHERE goal_id=:gid AND step_index=:si"
@@ -456,34 +490,46 @@ def prove_step(goal_id, step_index):
 
             if existing:
                 db.execute(sql_text(
-                    "UPDATE goal_steps SET completed_at=NOW(), user_answer=:ans, ai_feedback=:fb, score=:sc "
+                    "UPDATE goal_steps "
+                    "SET completed_at=NOW(), user_answer=:ans, ai_feedback=:fb, score=:sc "
                     "WHERE goal_id=:gid AND step_index=:si"
-                ), {"ans": answer[:500], "fb": feedback, "sc": 100 if not skipped else 70,
+                ), {"ans": answer[:500], "fb": feedback,
+                    "sc": 100 if not skipped else 70,
                     "gid": goal_id, "si": step_index})
             else:
                 db.execute(sql_text(
-                    "INSERT INTO goal_steps (goal_id, user_id, step_index, completed_at, user_answer, ai_feedback, score) "
-                    "VALUES (:gid, :uid, :si, NOW(), :ans, :fb, :sc)"
+                    "INSERT INTO goal_steps "
+                    "  (goal_id, user_id, step_index, completed_at, user_answer, ai_feedback, score) "
+                    "VALUES "
+                    "  (:gid, :uid, :si, NOW(), :ans, :fb, :sc)"
                 ), {"gid": goal_id, "uid": user_id, "si": step_index,
-                    "ans": answer[:500], "fb": feedback, "sc": 100 if not skipped else 70})
+                    "ans": answer[:500], "fb": feedback,
+                    "sc": 100 if not skipped else 70})
             db.commit()
         except Exception as se:
             print(f"Step save error: {se}")
             db.rollback()
 
-        # ── FIX 2: completion check uses completed_at IS NOT NULL ─────────────
+        # ── Check if entire goal is now complete ──────────────────────────────
         goal_completed = False
         try:
-            goal_row = db.execute(sql_text("SELECT roadmap FROM goals WHERE id=:gid"), {"gid": goal_id}).fetchone()
+            goal_row = db.execute(sql_text(
+                "SELECT roadmap FROM goals WHERE id=:gid"
+            ), {"gid": goal_id}).fetchone()
             if goal_row and goal_row[0]:
                 rm    = json.loads(goal_row[0]) if isinstance(goal_row[0], str) else goal_row[0]
                 total = len(rm.get("steps", [])) if isinstance(rm, dict) else len(rm)
                 done  = db.execute(sql_text(
-                    "SELECT COUNT(*) FROM goal_steps WHERE goal_id=:gid AND completed_at IS NOT NULL"
+                    "SELECT COUNT(*) FROM goal_steps "
+                    "WHERE goal_id=:gid AND completed_at IS NOT NULL"
                 ), {"gid": goal_id}).fetchone()[0]
                 if total > 0 and done >= total:
-                    db.execute(sql_text("UPDATE goals SET completed=TRUE, is_complete=TRUE WHERE id=:gid"), {"gid": goal_id})
-                    db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+100 WHERE id=:uid"), {"uid": user_id})
+                    db.execute(sql_text(
+                        "UPDATE goals SET completed=TRUE, is_complete=TRUE WHERE id=:gid"
+                    ), {"gid": goal_id})
+                    db.execute(sql_text(
+                        "UPDATE users SET xp=COALESCE(xp,0)+100 WHERE id=:uid"
+                    ), {"uid": user_id})
                     db.commit()
                     goal_completed = True
         except Exception as ce:
@@ -491,17 +537,29 @@ def prove_step(goal_id, step_index):
 
         xp = 10 if skipped else 15
         try:
-            db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+:xp WHERE id=:uid"), {"xp": xp, "uid": user_id})
+            db.execute(sql_text(
+                "UPDATE users SET xp=COALESCE(xp,0)+:xp WHERE id=:uid"
+            ), {"xp": xp, "uid": user_id})
             db.commit()
         except Exception:
             db.rollback()
 
-        return jsonify({"passed": passed, "feedback": feedback, "xp_awarded": xp, "goal_completed": goal_completed})
+        return jsonify({
+            "passed":        passed,
+            "feedback":      feedback,
+            "xp_awarded":    xp,
+            "goal_completed": goal_completed,
+        })
 
     except Exception as e:
         db.rollback()
         print("Prove step error:", e)
-        return jsonify({"passed": True, "feedback": "Step recorded. Keep going!", "xp_awarded": 10, "goal_completed": False})
+        return jsonify({
+            "passed":        True,
+            "feedback":      "Step recorded. Keep going!",
+            "xp_awarded":    10,
+            "goal_completed": False,
+        })
     finally:
         db.close()
 
@@ -511,7 +569,9 @@ def prove_step(goal_id, step_index):
 def struggle_help(goal_id, step_index):
     db = SessionLocal()
     try:
-        goal_row = db.execute(sql_text("SELECT title, roadmap FROM goals WHERE id=:gid"), {"gid": goal_id}).fetchone()
+        goal_row = db.execute(sql_text(
+            "SELECT title, roadmap FROM goals WHERE id=:gid"
+        ), {"gid": goal_id}).fetchone()
         if not goal_row:
             return jsonify({"micro_tasks": []})
 
@@ -557,7 +617,6 @@ def struggle_help(goal_id, step_index):
 
 
 # ── GET /goals/<id>/steps ─────────────────────────────────────
-# ── FIX 3: SELECT completed_at, derive bool via `is not None` ─
 @goals_bp.route("/goals/<int:goal_id>/steps", methods=["GET"])
 def get_goal_steps(goal_id):
     db = SessionLocal()
@@ -587,11 +646,17 @@ def get_goal_steps(goal_id):
 def complete_goal(goal_id):
     db = SessionLocal()
     try:
-        row = db.execute(sql_text("SELECT user_id FROM goals WHERE id=:gid"), {"gid": goal_id}).fetchone()
+        row = db.execute(sql_text(
+            "SELECT user_id FROM goals WHERE id=:gid"
+        ), {"gid": goal_id}).fetchone()
         if not row:
             return jsonify({"error": "Goal not found"}), 404
-        db.execute(sql_text("UPDATE goals SET completed=TRUE, is_complete=TRUE WHERE id=:gid"), {"gid": goal_id})
-        db.execute(sql_text("UPDATE users SET xp=COALESCE(xp,0)+50 WHERE id=:uid"), {"uid": row[0]}),
+        db.execute(sql_text(
+            "UPDATE goals SET completed=TRUE, is_complete=TRUE WHERE id=:gid"
+        ), {"gid": goal_id})
+        db.execute(sql_text(
+            "UPDATE users SET xp=COALESCE(xp,0)+50 WHERE id=:uid"
+        ), {"uid": row[0]})
         db.commit()
         return jsonify({"message": "Goal completed! +50 XP!"})
     except Exception as e:
@@ -607,7 +672,7 @@ def delete_goal(goal_id):
     db = SessionLocal()
     try:
         db.execute(sql_text("DELETE FROM goal_steps WHERE goal_id=:gid"), {"gid": goal_id})
-        db.execute(sql_text("DELETE FROM goals WHERE id=:gid"), {"gid": goal_id})
+        db.execute(sql_text("DELETE FROM goals WHERE id=:gid"),           {"gid": goal_id})
         db.commit()
         return jsonify({"message": "Deleted!"})
     except Exception as e:

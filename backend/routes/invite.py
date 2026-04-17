@@ -1,13 +1,9 @@
 """
-routes/invite.py — FULLY FIXED v2
+routes/invite.py — FULLY FIXED v3
 
-Bugs fixed vs previous version:
-  1. /invite/send — now reads 'invited_email' from body (what Badges.jsx sends)
-     as well as 'email' and 'to_email' for backwards compat.
-  2. /invite/join  — removed ON CONFLICT DO NOTHING (no unique constraint exists).
-     Instead checks for an existing row before inserting to prevent double XP.
-  3. /invite/stats — unchanged, still correct.
-  4. All routes handle OPTIONS for CORS preflight.
+Changes vs v2:
+  1. Added /invite/stats/all — must be placed BEFORE /invite/stats/<int:user_id>
+     so Flask doesn't try to cast "all" as an integer.
 """
 import os
 import requests as http_requests
@@ -93,11 +89,11 @@ def send_invite():
     data = request.get_json() or {}
     user_id = data.get("user_id")
 
-    # FIX 1: Accept all three field names — 'invited_email' is what Badges.jsx sends
+    # Accept all three field names — 'invited_email' is what Badges.jsx sends
     to_email = (
-        data.get("invited_email") or   # ← Badges.jsx sends this
-        data.get("email") or            # ← legacy
-        data.get("to_email") or         # ← legacy
+        data.get("invited_email") or
+        data.get("email") or
+        data.get("to_email") or
         ""
     ).strip()
 
@@ -111,7 +107,7 @@ def send_invite():
     sender_name, _ = get_sender(user_id)
     invite_url = f"https://manifesting-motivation-ai.vercel.app?ref={user_id}&mode=signup"
 
-    # ── Record in DB first (even if Resend fails) ─────────────────────────────
+    # Record in DB first (even if Resend fails)
     db = None
     try:
         db = SessionLocal()
@@ -129,7 +125,7 @@ def send_invite():
         if db:
             db.close()
 
-    # ── Send email via Resend if key is configured ────────────────────────────
+    # Send email via Resend if key is configured
     if RESEND_API_KEY:
         try:
             response = http_requests.post(
@@ -169,14 +165,6 @@ def get_invite_link(user_id):
 
 @invite_bp.route("/invite/join", methods=["POST", "OPTIONS"])
 def record_join():
-    """
-    Called from React signup when ?ref=USER_ID is in the URL.
-    Body: { new_user_id, ref_user_id }
-
-    FIX 2: Instead of ON CONFLICT (no unique constraint), we manually check
-    whether this new_user_id already has a 'joined' row for this inviter.
-    This prevents double XP without needing a DB migration.
-    """
     if request.method == "OPTIONS":
         return jsonify({}), 200
 
@@ -191,7 +179,7 @@ def record_join():
 
     db = SessionLocal()
     try:
-        # Check if this join was already recorded (prevent double XP)
+        # Prevent double XP — check for existing joined row
         existing = db.execute(sql_text(
             "SELECT id FROM invites "
             "WHERE inviter_id=:uid AND joined_user_id=:jid AND status='joined'"
@@ -229,6 +217,55 @@ def record_join():
         db.close()
 
 
+# ── /invite/stats/all MUST be before /invite/stats/<int:user_id> ─────────────
+# Flask matches routes top to bottom. If the int route comes first,
+# it tries to cast "all" as an integer and returns 404/405.
+@invite_bp.route("/invite/stats/all", methods=["GET", "OPTIONS"])
+def get_all_invite_stats():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+
+    db = SessionLocal()
+    try:
+        total_sent = db.execute(sql_text(
+            "SELECT COUNT(*) FROM invites WHERE status='sent'"
+        )).fetchone()[0]
+
+        total_joined = db.execute(sql_text(
+            "SELECT COUNT(*) FROM invites WHERE status='joined'"
+        )).fetchone()[0]
+
+        total_users = db.execute(sql_text(
+            "SELECT COUNT(*) FROM users"
+        )).fetchone()[0]
+
+        top_inviters = db.execute(sql_text(
+            "SELECT u.name, COUNT(i.id) as joins "
+            "FROM invites i "
+            "JOIN users u ON u.id = i.inviter_id "
+            "WHERE i.status = 'joined' "
+            "GROUP BY u.name "
+            "ORDER BY joins DESC "
+            "LIMIT 5"
+        )).fetchall()
+
+        return jsonify({
+            "total_invites_sent":  total_sent,
+            "total_joins":         total_joined,
+            "total_users":         total_users,
+            "total_xp_awarded":    total_joined * 75,  # 50 to inviter + 25 to new user
+            "top_inviters": [
+                {"name": row[0], "joins": row[1], "xp_earned": row[1] * 50}
+                for row in top_inviters
+            ]
+        })
+    except Exception as e:
+        print(f"[invite/stats/all] {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
 @invite_bp.route("/invite/stats/<int:user_id>", methods=["GET"])
 def get_invite_stats(user_id):
     db = SessionLocal()
@@ -245,11 +282,11 @@ def get_invite_stats(user_id):
         joined_count = joined_row[0] if joined_row else 0
 
         return jsonify({
-            "total_invites":  sent_count,
-            "sent_count":     sent_count,
-            "joined_count":   joined_count,
-            "user_id":        user_id,
-            "xp_earned":      joined_count * 50,
+            "total_invites": sent_count,
+            "sent_count":    sent_count,
+            "joined_count":  joined_count,
+            "user_id":       user_id,
+            "xp_earned":     joined_count * 50,
         })
     except Exception as e:
         print(f"[invite/stats] {e}")

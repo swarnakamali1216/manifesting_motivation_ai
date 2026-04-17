@@ -18,6 +18,7 @@ goals_bp = Blueprint("goals", __name__)
 
 
 # ── Step count calculation ─────────────────────────────────────
+# goals.py — fix calc_step_count()
 def calc_step_count(timeline, daily_time, depth):
     days_map  = {"1 week":7, "2 weeks":14, "1 month":30, "3 months":90, "6 months":180}
     mins_map  = {"15 mins":15, "30 mins":30, "1 hour":60, "2+ hours":120}
@@ -26,8 +27,7 @@ def calc_step_count(timeline, daily_time, depth):
     mins  = mins_map.get(str(daily_time), 30)
     mult  = depth_map.get(str(depth), 1.0)
     count = math.ceil((days * mins * mult) / 60)
-    return max(4, min(15, count))
-
+    return max(3, min(50, count))  # was max(4, min(15, count))
 
 _SAFE_INDEX_DOMAINS = [
     "docs.python.org", "developer.mozilla.org", "react.dev", "dev.java",

@@ -28,7 +28,7 @@ var TABS = [
 ];
 
 // ── ElevenLabs key (called directly from browser — bypasses Render IP block) ─
-var ELEVENLABS_KEY = "PASTE_YOUR_NEW_KEY_HERE"; // ← replace with your new key
+var ELEVENLABS_KEY = "sk_bb688b60318d2be8f2e24c5f50b192b4501a66efe5c47257"; // ← replace with your new key
 
 // ── Direct browser → ElevenLabs TTS ──────────────────────────────────────────
 async function speakWithElevenLabs(text, voiceId, onEnd) {

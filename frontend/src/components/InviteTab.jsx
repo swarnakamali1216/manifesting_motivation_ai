@@ -1,12 +1,9 @@
 import React, { useState } from "react";
 
-var API = "https://manifesting-motivation-backend.onrender.com/api";
+
 
 function InviteTab({ user }) {
-  var [friendEmail, setFriendEmail] = useState("");
-  var [sending,     setSending]     = useState(false);
-  var [result,      setResult]      = useState(null);
-  var [copied,      setCopied]      = useState(false);
+  var [copied, setCopied] = useState(false);
 
   var refId      = user && user.id ? String(user.id) : "";
   var inviteLink = "https://manifesting-motivation-ai.vercel.app/?ref=" + refId + "&mode=signup";
@@ -27,43 +24,6 @@ function InviteTab({ user }) {
         setCopied(true);
         setTimeout(function() { setCopied(false); }, 2200);
       });
-  }
-
-  function sendEmail() {
-    var trimmed = friendEmail.trim();
-    if (!trimmed || !trimmed.includes("@")) {
-      setResult({ ok: false, msg: "Please enter a valid email address" });
-      return;
-    }
-    if (!user || !user.id) {
-      setResult({ ok: false, msg: "User not found — please log in again" });
-      return;
-    }
-
-    setSending(true);
-    setResult(null);
-
-    fetch(API + "/invite/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id:       user.id,
-        invited_email: trimmed,
-      }),
-    })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.success) {
-          setResult({ ok: true, msg: data.message || "Invite sent! You'll earn +50 XP when they join." });
-          setFriendEmail("");
-        } else {
-          setResult({ ok: false, msg: data.error || "Failed to send invite" });
-        }
-      })
-      .catch(function() {
-        setResult({ ok: false, msg: "Network error — check your connection and try again" });
-      })
-      .finally(function() { setSending(false); });
   }
 
   return (
@@ -121,7 +81,7 @@ function InviteTab({ user }) {
             <span style={{ color: "#7c5cfc" }}>{user && user.name ? user.name : "you"}</span>
           </div>
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-            Email sent via Resend (professional delivery)
+            Share your link to invite friends
           </div>
         </div>
       </div>
@@ -153,53 +113,6 @@ function InviteTab({ user }) {
           {copied ? "Copied!" : "Copy"}
         </button>
       </div>
-
-      {/* EMAIL INVITE */}
-      <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", letterSpacing: "0.1em", marginBottom: 8 }}>
-        INVITE BY EMAIL
-      </div>
-      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 10 }}>
-        A beautifully designed invite email is sent from Manifesting Motivation — mentioning it's from you.
-      </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-        <input
-          type="email"
-          placeholder="friend@gmail.com"
-          value={friendEmail}
-          onChange={function(e) { setFriendEmail(e.target.value); setResult(null); }}
-          onKeyDown={function(e) { if (e.key === "Enter") sendEmail(); }}
-          disabled={sending}
-          style={{
-            flex: 1, padding: "11px 14px", borderRadius: 12,
-            border: "1.5px solid var(--border)",
-            background: "var(--card)", color: "var(--text)", fontSize: 13,
-          }}
-        />
-        <button
-          onClick={sendEmail}
-          disabled={sending}
-          style={{
-            padding: "11px 22px", borderRadius: 12, border: "none",
-            cursor: sending ? "not-allowed" : "pointer",
-            background: sending ? "rgba(124,92,252,0.35)" : "linear-gradient(135deg,#7c5cfc,#9c7cfc)",
-            color: "white", fontSize: 13, fontWeight: 800, whiteSpace: "nowrap",
-          }}
-        >
-          {sending ? "Sending..." : "Send"}
-        </button>
-      </div>
-
-      {result && (
-        <div style={{
-          padding: "10px 14px", borderRadius: 10, marginBottom: 16,
-          fontSize: 13, fontWeight: 600,
-          background: result.ok ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
-          border: "1px solid " + (result.ok ? "rgba(74,222,128,0.3)" : "rgba(248,113,113,0.3)"),
-          color: result.ok ? "#4ade80" : "#f87171",
-        }}>
-          {result.msg}
-        </div>
-      )}
 
       {/* SHARE ON */}
       <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", letterSpacing: "0.1em", marginBottom: 10 }}>
@@ -251,9 +164,9 @@ function InviteTab({ user }) {
         <div style={{ fontWeight: 800, fontSize: 11, color: "var(--text)", marginBottom: 8, letterSpacing: "0.08em" }}>
           HOW IT WORKS
         </div>
-        <div>1. Type their email above and hit Send</div>
-        <div>2. They receive a beautiful invite from Manifesting Motivation</div>
-        <div>3. They click the link and sign up with your referral</div>
+        <div>1. Copy your invite link or share via WhatsApp / LinkedIn</div>
+        <div>2. Your friend clicks the link and signs up</div>
+        <div>3. They join with your referral automatically</div>
         <div>4. You get <span style={{ color: "#4ade80", fontWeight: 700 }}>+50 XP</span> · They get <span style={{ color: "#60a5fa", fontWeight: 700 }}>+25 XP</span> welcome bonus</div>
       </div>
 

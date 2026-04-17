@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import emailjs from "@emailjs/browser";
 
 var API = "https://manifesting-motivation-backend.onrender.com/api";
 
@@ -74,7 +73,6 @@ function LevelPath({ levels, currentLevelNum, userXP }) {
         var col       = lv.color || "#7c5cfc";
         return (
           <div key={lv.level} style={{display:"flex",justifyContent:"center",position:"relative",zIndex:1,marginBottom:"20px"}}>
-            {/* Side label */}
             <div style={{position:"absolute",[side==="left"?"right":"left"]:"calc(50% + 42px)",top:"50%",transform:"translateY(-50%)",maxWidth:"110px",textAlign:side==="left"?"right":"left",pointerEvents:"none"}}>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:"800",fontSize:"12px",color:isFuture?"var(--muted)":col,whiteSpace:"nowrap"}}>{lv.name}</div>
               <div style={{fontSize:"9px",color:"var(--muted)",marginTop:"2px",lineHeight:"1.3"}}>{lv.desc}</div>
@@ -82,7 +80,6 @@ function LevelPath({ levels, currentLevelNum, userXP }) {
                 {lv.xp_required===0?"Starting":"≥"+lv.xp_required.toLocaleString()+" XP"}
               </div>
             </div>
-            {/* Node */}
             <div style={{
               width:isCurrent?"58px":"42px",height:isCurrent?"58px":"42px",
               borderRadius:"50%",
@@ -135,27 +132,21 @@ function BadgeCard({ badge, isNew }) {
       onMouseEnter={function(e){ if(isEarned) e.currentTarget.style.transform="translateY(-4px) scale(1.02)"; }}
       onMouseLeave={function(e){ e.currentTarget.style.transform="translateY(0) scale(1)"; }}
     >
-      {/* Glow layer for earned badges */}
       {isEarned && (
         <div style={{position:"absolute",inset:0,borderRadius:"18px",background:"linear-gradient(135deg,rgba(124,92,252,0.06),rgba(252,92,240,0.04))",pointerEvents:"none"}}/>
       )}
-
       {isNew && (
         <div style={{position:"absolute",top:"8px",right:"8px",background:"#fbbf24",borderRadius:"6px",padding:"2px 6px",fontSize:"8px",fontWeight:"900",color:"#000",letterSpacing:"0.05em"}}>NEW!</div>
       )}
       {!isEarned && (
         <div style={{position:"absolute",top:"8px",right:"8px",fontSize:"13px"}}>🔒</div>
       )}
-
       <div style={{fontSize:isEarned?"34px":"26px",marginBottom:"8px",filter:isEarned?"none":"grayscale(1)",transition:"font-size 0.2s"}}>{badge.emoji}</div>
       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:"800",fontSize:"11px",color:isEarned?"var(--text)":"var(--muted)",marginBottom:"4px",lineHeight:"1.3"}}>{badge.name}</div>
       <div style={{fontSize:"9px",color:"var(--muted)",lineHeight:"1.4",marginBottom:"6px"}}>{badge.desc}</div>
-
-      {/* Requirement pill */}
       {badge.req && (
         <div style={{fontSize:"8px",color:isEarned?"var(--accent)":"var(--muted)",background:isEarned?"rgba(124,92,252,0.1)":"transparent",border:isEarned?"1px solid rgba(124,92,252,0.25)":"none",borderRadius:"8px",padding:isEarned?"2px 6px":"0",marginBottom:"4px",display:"inline-block"}}>{badge.req}</div>
       )}
-
       {badge.xp > 0 && (
         <div style={{fontSize:"10px",fontWeight:"800",color:isEarned?"#a78bfa":"var(--muted)"}}>{isEarned?"+":""}+{badge.xp} XP</div>
       )}
@@ -166,7 +157,7 @@ function BadgeCard({ badge, isNew }) {
   );
 }
 
-// ── Invite panel — REAL email sending ─────────────────────────────────────────
+// ── Invite panel — backend Resend only (no EmailJS) ───────────────────────────
 function InvitePanel({ user }) {
   var [email,   setEmail]   = useState("");
   var [sending, setSending] = useState(false);
@@ -179,11 +170,9 @@ function InvitePanel({ user }) {
 
   useEffect(function() {
     if (!user?.id) return;
-    // Get real invite link from backend
     axios.get(API+"/invite/link/"+user.id)
       .then(function(r){ setLink(r.data.link||""); })
       .catch(function(){});
-    // Get invite stats
     axios.get(API+"/invite/stats/"+user.id)
       .then(function(r){ setIStats(r.data||{}); })
       .catch(function(){});
@@ -203,7 +192,7 @@ function InvitePanel({ user }) {
       .catch(function(){});
   }
 
-  // ── Email sending via EmailJS + record in DB ───────────────────────────────
+  // ── Email sending via backend Resend only ─────────────────────────────────
   function sendInviteEmail(e) {
     if (e && e.preventDefault) e.preventDefault();
     var trimmed = email.trim().toLowerCase();
@@ -214,50 +203,33 @@ function InvitePanel({ user }) {
     setSending(true);
     setResult(null);
 
-    var serviceId  = process.env.REACT_APP_EMAILJS_SERVICE_ID;
-    var templateId = process.env.REACT_APP_EMAILJS_TEMPLATE_ID;
-    var publicKey  = process.env.REACT_APP_EMAILJS_PUBLIC_KEY;
-
-    emailjs.send(
-      serviceId,
-      templateId,
-      {
-        sender_name: user && user.name ? user.name : "A friend",
-        invite_url:  inviteLink,
-        to_email:    trimmed,
-      },
-      publicKey
-    )
-    .then(function() {
-      // ✅ FIX 1 — Record the invite in the DB so pgAdmin + stats are accurate
-      axios.post(API + "/invite/send", {
-        user_id:      user.id,
+    fetch(API + "/invite/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id:       user.id,
         invited_email: trimmed,
-      }).catch(function(err) {
-        console.warn("[Invite DB] Could not record invite:", err);
-      });
-
-      setResult({
-        success: true,
-        message: "Invite sent to " + trimmed + "! You will earn +50 XP when they join.",
-        email_sent: true,
-      });
-      setEmail("");
-
-      // Refresh invite stats after a short delay to let the DB write complete
-      setTimeout(refreshStats, 800);
+      }),
     })
-    .catch(function(err) {
-      console.error("[EmailJS] Error:", err);
-      setResult({
-        success: false,
-        message: "Failed to send: " + (err && err.text ? err.text : "Check EmailJS dashboard"),
-      });
-    })
-    .finally(function(){ setSending(false); });
+      .then(function(r){ return r.json(); })
+      .then(function(data) {
+        if (data.success) {
+          setResult({
+            success: true,
+            message: data.message || "Invite sent! You'll earn +50 XP when they join.",
+          });
+          setEmail("");
+          setTimeout(refreshStats, 800);
+        } else {
+          setResult({ success: false, message: data.error || "Failed to send invite" });
+        }
+      })
+      .catch(function() {
+        setResult({ success: false, message: "Network error — check your connection." });
+      })
+      .finally(function(){ setSending(false); });
   }
 
-  // ✅ FIX 2 — Normalise stats field names (backend may return any of these)
   var totalInvited = istats.total_invited || istats.total_invites || istats.sent_count || 0;
   var totalJoined  = istats.joined        || istats.joined_count  || 0;
   var totalXP      = istats.xp_earned     || 0;
@@ -268,9 +240,9 @@ function InvitePanel({ user }) {
       {/* Stats row */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:"8px"}}>
         {[
-          {label:"Invited",   value:totalInvited,        icon:"✉️", color:"#7c5cfc"},
-          {label:"Joined",    value:totalJoined,          icon:"👥", color:"#4ade80"},
-          {label:"XP Earned", value:totalXP+" XP",        icon:"⚡", color:"#fbbf24"},
+          {label:"Invited",   value:totalInvited,   icon:"✉️", color:"#7c5cfc"},
+          {label:"Joined",    value:totalJoined,    icon:"👥", color:"#4ade80"},
+          {label:"XP Earned", value:totalXP+" XP",  icon:"⚡", color:"#fbbf24"},
         ].map(function(s){ return (
           <div key={s.label} style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:"14px",padding:"14px 10px",textAlign:"center"}}>
             <div style={{fontSize:"20px",marginBottom:"4px"}}>{s.icon}</div>
@@ -299,34 +271,29 @@ function InvitePanel({ user }) {
         </div>
       </div>
 
-      {/* Email invite — REAL sending */}
+      {/* Email invite */}
       <div>
         <div style={{fontSize:"10px",fontWeight:"800",color:"var(--muted)",letterSpacing:"0.12em",marginBottom:"8px",fontFamily:"'Syne',sans-serif"}}>INVITE BY EMAIL</div>
+        <div style={{fontSize:"11px",color:"var(--muted)",marginBottom:"10px"}}>A beautifully designed invite email is sent from Manifesting Motivation — mentioning it's from you.</div>
 
-        <form onSubmit={sendInviteEmail} style={{display:"flex",gap:"8px"}}>
+        <div style={{display:"flex",gap:"8px"}}>
           <input
             type="email"
             value={email}
             onChange={function(e){ setEmail(e.target.value); setResult(null); }}
+            onKeyDown={function(e){ if(e.key==="Enter") sendInviteEmail(); }}
             placeholder="friend@email.com"
             disabled={sending}
             style={{flex:1,padding:"11px 14px",borderRadius:"12px",border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:"14px",fontFamily:"'DM Sans',sans-serif",outline:"none"}}
           />
-          <button type="submit" disabled={sending||!email.trim()} style={{padding:"11px 20px",borderRadius:"12px",border:"none",background:(!sending&&email.trim())?"linear-gradient(135deg,#7c5cfc,#fc5cf0)":"rgba(124,92,252,0.25)",color:"#fff",fontSize:"13px",fontWeight:"800",cursor:(!sending&&email.trim())?"pointer":"not-allowed",fontFamily:"'Syne',sans-serif",flexShrink:0,transition:"all 0.2s",opacity:(!sending&&email.trim())?1:0.6}}>
+          <button onClick={sendInviteEmail} disabled={sending||!email.trim()} style={{padding:"11px 20px",borderRadius:"12px",border:"none",background:(!sending&&email.trim())?"linear-gradient(135deg,#7c5cfc,#fc5cf0)":"rgba(124,92,252,0.25)",color:"#fff",fontSize:"13px",fontWeight:"800",cursor:(!sending&&email.trim())?"pointer":"not-allowed",fontFamily:"'Syne',sans-serif",flexShrink:0,transition:"all 0.2s",opacity:(!sending&&email.trim())?1:0.6}}>
             {sending?"Sending...":"Send →"}
           </button>
-        </form>
+        </div>
 
-        {/* Result message */}
         {result && (
           <div style={{marginTop:"10px",padding:"12px 16px",borderRadius:"12px",background:result.success?"rgba(74,222,128,0.08)":"rgba(248,113,113,0.08)",border:"1px solid "+(result.success?"rgba(74,222,128,0.3)":"rgba(248,113,113,0.3)"),fontSize:"12px",color:result.success?"#16a34a":"#dc2626",lineHeight:"1.6"}}>
             {result.success?"✅ ":"❌ "}{result.message}
-            {result.link && !result.email_sent && (
-              <div style={{marginTop:"6px"}}>
-                <span style={{color:"var(--muted)"}}>Share: </span>
-                <a href={result.link} style={{color:"#7c5cfc",fontSize:"11px",wordBreak:"break-all"}}>{result.link}</a>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -381,7 +348,6 @@ function Badges({ user }) {
     </div>
   );
 
-  // ── Safe extraction ───────────────────────────────────────────────────────
   var xp          = safeXP(stats?.xp);
   var levelNum    = safeLevelNum(stats?.level);
   var levelName   = safeLevelName(stats?.level);
@@ -418,16 +384,14 @@ function Badges({ user }) {
       `}</style>
       {xpBurst && <XPBurst xp={xpBurst}/>}
 
-      {/* Page header */}
       <div style={{marginBottom:"22px"}}>
         <h1 style={{fontFamily:"'Syne',sans-serif",fontWeight:"900",fontSize:"28px",background:"linear-gradient(135deg,#e8e0ff 30%,#9b8aff)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",marginBottom:"4px",letterSpacing:"-0.5px"}}>Achievements</h1>
         <p style={{color:"var(--muted)",fontSize:"13px"}}>Your XP, {badgesTotal} badges, {levels.length} levels — earn them all</p>
       </div>
 
-      {/* ── LEVEL BANNER ── */}
+      {/* Level banner */}
       <div style={{borderRadius:"24px",padding:"22px 24px",marginBottom:"16px",background:"linear-gradient(135deg,"+levelColor+"18,"+levelColor+"06)",border:"1px solid "+levelColor+"30",position:"relative",overflow:"hidden"}}>
         <div style={{position:"absolute",top:"-50px",right:"-50px",width:"160px",height:"160px",borderRadius:"50%",background:levelColor+"20",filter:"blur(40px)",pointerEvents:"none"}}/>
-
         <div style={{display:"flex",alignItems:"center",gap:"18px"}}>
           <div style={{width:"68px",height:"68px",borderRadius:"50%",background:"linear-gradient(135deg,"+levelColor+","+levelColor+"99)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"30px",boxShadow:"0 0 30px "+levelColor+"50",flexShrink:0}}>
             {levelEmoji}
@@ -444,27 +408,21 @@ function Badges({ user }) {
             <div style={{fontSize:"9px",color:"var(--muted)",marginTop:"2px"}}>XP TOTAL</div>
           </div>
         </div>
-
-        {/* XP progress bar */}
         <div style={{marginTop:"16px"}}>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:"5px"}}>
-            <span style={{fontSize:"10px",color:"var(--muted)",fontFamily:"'Syne',sans-serif",fontWeight:"700"}}>
-              TO {nextLevel?nextLevel.name.toUpperCase():"MAX LEVEL"}
-            </span>
+            <span style={{fontSize:"10px",color:"var(--muted)",fontFamily:"'Syne',sans-serif",fontWeight:"700"}}>TO {nextLevel?nextLevel.name.toUpperCase():"MAX LEVEL"}</span>
             <span style={{fontSize:"10px",fontWeight:"800",color:levelColor}}>{progressPct.toFixed(0)}%</span>
           </div>
           <div style={{height:"10px",borderRadius:"5px",background:"var(--border)",overflow:"hidden"}}>
             <div style={{height:"100%",width:Math.min(100,progressPct)+"%",background:"linear-gradient(90deg,"+levelColor+","+levelColor+"aa)",borderRadius:"5px",transition:"width 1.2s ease"}}/>
           </div>
         </div>
-
-        {/* Mini stats */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:"8px",marginTop:"16px"}}>
           {[
-            {e:"🔥",v:streak+"d",            l:"Streak"},
+            {e:"🔥",v:streak+"d",           l:"Streak"},
             {e:"🏅",v:badgesEarned+"/"+badgesTotal,l:"Badges"},
-            {e:"✅",v:stats?.goals_done||0,  l:"Goals"},
-            {e:"📓",v:stats?.journals||0,    l:"Journals"},
+            {e:"✅",v:stats?.goals_done||0, l:"Goals"},
+            {e:"📓",v:stats?.journals||0,   l:"Journals"},
           ].map(function(s){ return (
             <div key={s.l} style={{background:"rgba(0,0,0,0.12)",borderRadius:"12px",padding:"10px 6px",textAlign:"center"}}>
               <div style={{fontSize:"15px"}}>{s.e}</div>
@@ -475,7 +433,6 @@ function Badges({ user }) {
         </div>
       </div>
 
-      {/* Newly earned notification */}
       {newlyAwarded.length > 0 && (
         <div style={{padding:"14px 18px",borderRadius:"14px",marginBottom:"16px",background:"rgba(251,191,36,0.08)",border:"1px solid rgba(251,191,36,0.3)",display:"flex",alignItems:"flex-start",gap:"12px"}}>
           <span style={{fontSize:"22px",flexShrink:0}}>🎉</span>
@@ -503,14 +460,10 @@ function Badges({ user }) {
         })}
       </div>
 
-      {/* ── JOURNEY TAB ── */}
       {tab==="progress" && (
         <div>
           <div style={{fontFamily:"'Syne',sans-serif",fontSize:"11px",fontWeight:"800",color:"var(--muted)",letterSpacing:"0.12em",marginBottom:"16px"}}>YOUR LEVEL JOURNEY — {levels.length} LEVELS TOTAL</div>
-
           <LevelPath levels={levels} currentLevelNum={levelNum} userXP={xp} />
-
-          {/* How to earn XP */}
           <div style={{background:"var(--card)",borderRadius:"20px",padding:"18px 20px",border:"1px solid var(--border)",marginTop:"16px"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:"11px",fontWeight:"800",color:"var(--muted)",letterSpacing:"0.12em",marginBottom:"14px"}}>HOW TO EARN XP</div>
             {[
@@ -536,36 +489,21 @@ function Badges({ user }) {
         </div>
       )}
 
-      {/* ── BADGES TAB ── */}
       {tab==="badges" && (
         <div>
-          {/* Category filter pills */}
           <div style={{display:"flex",gap:"6px",flexWrap:"wrap",marginBottom:"16px"}}>
             {Object.entries(CAT_INFO).map(function(entry){
               var k = entry[0]; var v = entry[1];
-              var count = k==="all"
-                ? allBadges.length
-                : allBadges.filter(function(b){ return b.category===k; }).length;
-              var earnedInCat = k==="all"
-                ? badgesEarned
-                : allBadges.filter(function(b){ return b.category===k && b.earned; }).length;
+              var count = k==="all" ? allBadges.length : allBadges.filter(function(b){ return b.category===k; }).length;
+              var earnedInCat = k==="all" ? badgesEarned : allBadges.filter(function(b){ return b.category===k && b.earned; }).length;
               return (
-                <button key={k} onClick={function(){setCatFilter(k);}} style={{
-                  padding:"6px 12px",borderRadius:"20px",cursor:"pointer",
-                  border:catFilter===k?"2px solid var(--accent)":"1px solid var(--border)",
-                  background:catFilter===k?"rgba(124,92,252,0.1)":"transparent",
-                  color:catFilter===k?"var(--accent)":"var(--muted)",
-                  fontSize:"11px",fontFamily:"'Syne',sans-serif",fontWeight:"700",
-                  transition:"all 0.15s",display:"flex",alignItems:"center",gap:"4px",
-                }}>
+                <button key={k} onClick={function(){setCatFilter(k);}} style={{padding:"6px 12px",borderRadius:"20px",cursor:"pointer",border:catFilter===k?"2px solid var(--accent)":"1px solid var(--border)",background:catFilter===k?"rgba(124,92,252,0.1)":"transparent",color:catFilter===k?"var(--accent)":"var(--muted)",fontSize:"11px",fontFamily:"'Syne',sans-serif",fontWeight:"700",transition:"all 0.15s",display:"flex",alignItems:"center",gap:"4px"}}>
                   {v.icon} {v.label}
                   <span style={{fontSize:"9px",opacity:0.7}}>({earnedInCat}/{count})</span>
                 </button>
               );
             })}
           </div>
-
-          {/* Overall progress */}
           <div style={{background:"var(--card)",borderRadius:"14px",padding:"14px 18px",border:"1px solid var(--border)",marginBottom:"16px"}}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:"6px"}}>
               <span style={{fontSize:"12px",fontWeight:"700",color:"var(--text)"}}>🏅 Total collection</span>
@@ -576,8 +514,6 @@ function Badges({ user }) {
             </div>
             <div style={{fontSize:"10px",color:"var(--muted)",marginTop:"5px"}}>{badgesTotal-badgesEarned} badges remaining — keep going!</div>
           </div>
-
-          {/* Badge grid — 3 columns */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:"10px"}}>
             {filteredBadges.map(function(badge){
               return <BadgeCard key={badge.id||badge.key} badge={badge} isNew={newIds.includes(badge.id)} />;
@@ -586,10 +522,8 @@ function Badges({ user }) {
         </div>
       )}
 
-      {/* ── RANKINGS TAB ── */}
       {tab==="leaderboard" && <LeaderboardSection userId={userId} />}
 
-      {/* ── INVITE TAB ── */}
       {tab==="invite" && (
         <div>
           <div style={{fontFamily:"'Syne',sans-serif",fontSize:"11px",fontWeight:"800",color:"var(--muted)",letterSpacing:"0.12em",marginBottom:"16px"}}>INVITE FRIENDS</div>

@@ -2,6 +2,12 @@
  * Login.jsx — Designer-quality dark glassmorphism login
  * Butterfly SVG logo · floating butterflies · purple/pink gradient theme
  * Matches LandingPage aesthetic exactly.
+ *
+ * FIXED:
+ *  - refUserId moved to useState so it's available inside handleSubmit
+ *  - useEffect reads both window.location.search AND hash-based params
+ *    (some routers put params after the hash: /#/?ref=4&mode=signup)
+ *  - Both ref and mode are read in the same useEffect to avoid race conditions
  */
 import React, { useState, useEffect } from "react";
 import axios from "axios";
@@ -59,28 +65,50 @@ var BG = [
   {x:2,  y:50, s:21, d:4  }, {x:67, y:88, s:19, d:2  },
 ];
 
-function Login({ onLoginSuccess, onBack }) {
-  var [mode,    setMode]    = useState("login");
-  var [email,   setEmail]   = useState("");
-  var [password,setPassword]= useState("");
-  var [name,    setName]    = useState("");
-  var [loading, setLoading] = useState(false);
-  var [error,   setError]   = useState("");
-  var [showPw,  setShowPw]  = useState(false);
-
-  // ── Read ?ref= from URL once on mount ─────────────────────────────────────
-  var refUserId = null;
+// ── Helper: read a param from search string OR hash ────────────────────────
+function getParam(name) {
   try {
-    var urlParams = new URLSearchParams(window.location.search);
-    refUserId = urlParams.get("ref"); // e.g. "4" from ?ref=4&mode=signup
-  } catch(e) {}
+    // 1. Standard query string: ?ref=4&mode=signup
+    var search = new URLSearchParams(window.location.search);
+    if (search.get(name)) return search.get(name);
 
-  // ── If ?mode=signup in URL, open register tab automatically ───────────────
+    // 2. Hash-based query: /#/?ref=4&mode=signup  or  /#/login?ref=4&mode=signup
+    var hash = window.location.hash || "";
+    var hashQuery = hash.includes("?") ? hash.split("?")[1] : "";
+    if (hashQuery) {
+      var hashParams = new URLSearchParams(hashQuery);
+      if (hashParams.get(name)) return hashParams.get(name);
+    }
+  } catch(e) {}
+  return null;
+}
+
+function Login({ onLoginSuccess, onBack }) {
+  var [mode,      setMode]      = useState("login");
+  var [email,     setEmail]     = useState("");
+  var [password,  setPassword]  = useState("");
+  var [name,      setName]      = useState("");
+  var [loading,   setLoading]   = useState(false);
+  var [error,     setError]     = useState("");
+  var [showPw,    setShowPw]    = useState(false);
+
+  // ── refUserId in state so handleSubmit always sees the latest value ────────
+  var [refUserId, setRefUserId] = useState(null);
+
+  // ── Read URL params once on mount ─────────────────────────────────────────
   useEffect(function() {
     try {
-      var params = new URLSearchParams(window.location.search);
-      if (params.get("mode") === "signup") setMode("register");
-    } catch(e) {}
+      var ref  = getParam("ref");   // e.g. "4"
+      var mode = getParam("mode");  // e.g. "signup"
+
+      console.log("[Login] URL params → ref:", ref, "mode:", mode);
+
+      if (ref)              setRefUserId(ref);
+      if (mode === "signup") setMode("register");
+    } catch(e) {
+      console.warn("[Login] Could not read URL params:", e);
+    }
+
     delete axios.defaults.headers.common["X-Requested-With"];
   }, []);
 
@@ -88,6 +116,7 @@ function Login({ onLoginSuccess, onBack }) {
     e.preventDefault();
     if (!email.trim() || !password.trim()) { setError("Please fill in email and password"); return; }
     setLoading(true); setError("");
+
     var ep      = mode === "register" ? "/auth/register" : "/auth/login";
     var payload = mode === "register"
       ? { email:email.trim().toLowerCase(), password, name:name.trim()||"User" }
@@ -99,9 +128,12 @@ function Login({ onLoginSuccess, onBack }) {
         if (token) localStorage.setItem("token", token);
         localStorage.setItem("user", JSON.stringify(user));
 
-        // ── INVITE JOIN: fire-and-forget when new user signs up via referral link
+        // ── INVITE JOIN: fire-and-forget when new user signs up via referral ──
         if (mode === "register" && refUserId && user && user.id
             && String(refUserId) !== String(user.id)) {
+
+          console.log("[Login] Firing invite/join → ref_user_id:", refUserId, "new_user_id:", user.id);
+
           fetch(API + "/invite/join", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -118,7 +150,7 @@ function Login({ onLoginSuccess, onBack }) {
         onLoginSuccess(user);
       })
       .catch(function(err) {
-        setError(err?.response?.data?.error || "Authentication failed. Make sure Flask is running on port 5000.");
+        setError(err?.response?.data?.error || "Authentication failed. Make sure Flask is running.");
       })
       .finally(function(){ setLoading(false); });
   }

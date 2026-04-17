@@ -32,6 +32,23 @@ var PAGE_MAP = {
   settings:"/settings",admin:"/admin",
 };
 
+// ── Helper: read a param from search OR hash ──────────────────────────────────
+function getUrlParam(name) {
+  try {
+    // 1. Standard: ?ref=4&mode=signup
+    var s = new URLSearchParams(window.location.search);
+    if (s.get(name)) return s.get(name);
+
+    // 2. Hash-based: /#/?ref=4&mode=signup
+    var hash = window.location.hash || "";
+    if (hash.includes("?")) {
+      var h = new URLSearchParams(hash.split("?")[1]);
+      if (h.get(name)) return h.get(name);
+    }
+  } catch(e) {}
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AppInner — rendered inside <Router>
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,7 +56,6 @@ function AppInner({ user, onLogout, darkMode, toggleTheme, onOnboardingComplete 
   var navigate = useNavigate();
   var location = useLocation();
 
-  // ── REACTIVE isMobile — window.innerWidth read once causes hamburger to vanish ──
   var [isMobile,    setIsMobile]    = useState(window.innerWidth <= 768);
   var [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
 
@@ -47,8 +63,8 @@ function AppInner({ user, onLogout, darkMode, toggleTheme, onOnboardingComplete 
     function onResize() {
       var mobile = window.innerWidth <= 768;
       setIsMobile(mobile);
-      if (!mobile) setSidebarOpen(true);   // desktop: always show
-      else setSidebarOpen(false);           // mobile: hide on resize-to-small
+      if (!mobile) setSidebarOpen(true);
+      else setSidebarOpen(false);
     }
     window.addEventListener("resize", onResize);
     return function(){ window.removeEventListener("resize", onResize); };
@@ -56,7 +72,7 @@ function AppInner({ user, onLogout, darkMode, toggleTheme, onOnboardingComplete 
 
   function handleNavigate(page) {
     navigate(PAGE_MAP[page] || "/");
-    if (isMobile) setSidebarOpen(false);   // ← close on nav (mobile only)
+    if (isMobile) setSidebarOpen(false);
   }
 
   var path = location.pathname;
@@ -87,16 +103,11 @@ function AppInner({ user, onLogout, darkMode, toggleTheme, onOnboardingComplete 
 
   return (
     <div style={{minHeight:"100vh", background:"var(--bg)", display:"flex", position:"relative"}}>
-
-      {/* ── HAMBURGER — always rendered, CSS hides it on desktop ── */}
       <HamburgerButton
         isOpen={sidebarOpen}
         onClick={function(){ setSidebarOpen(function(prev){ return !prev; }); }}
       />
-      {/* ── NOTIFICATION BELL — always visible, top-right ── */}
       <NotificationBell userId={user?.id} onNavigate={handleNavigate}/>
-
-      {/* ── SIDEBAR ── */}
       <Sidebar
         isOpen={sidebarOpen}
         activePage={activePage}
@@ -107,17 +118,13 @@ function AppInner({ user, onLogout, darkMode, toggleTheme, onOnboardingComplete 
         darkMode={darkMode}
         toggleTheme={toggleTheme}
       />
-
-      {/* ── MAIN CONTENT ── */}
       <div style={{
         marginLeft: isMobile ? 0 : "230px",
         flex:1, minHeight:"100vh",
         transition:"margin-left 0.26s ease",
         width: isMobile ? "100%" : "calc(100% - 230px)",
       }}>
-        {/* Spacer so content doesn't hide under hamburger on mobile */}
         {isMobile && <div style={{height:60}}/>}
-
         <main style={{padding:"24px 20px", maxWidth:"960px", width:"100%", margin:"0 auto", boxSizing:"border-box"}}>
           <Routes>
             <Route path="/"           element={<Home           user={user} onNavigate={handleNavigate}/>}/>
@@ -141,11 +148,11 @@ function AppInner({ user, onLogout, darkMode, toggleTheme, onOnboardingComplete 
 // Root App
 // ─────────────────────────────────────────────────────────────────────────────
 function App() {
-  var [user,       setUser]       = useState(null);
-  var [loading,    setLoading]    = useState(true);
-  var [showLanding,setShowLanding]= useState(false);
-  var [showLogin,  setShowLogin]  = useState(false);
-  var [darkMode,   setDarkMode]   = useState(function(){
+  var [user,        setUser]        = useState(null);
+  var [loading,     setLoading]     = useState(true);
+  var [showLanding, setShowLanding] = useState(false);
+  var [showLogin,   setShowLogin]   = useState(false);
+  var [darkMode,    setDarkMode]    = useState(function(){
     return localStorage.getItem("theme") !== "light";
   });
 
@@ -160,8 +167,25 @@ function App() {
     }
   }, [darkMode]);
 
-  // Restore session from localStorage or token
+  // ── Session restore + invite link detection ─────────────────────────────────
   useEffect(function() {
+
+    // ── STEP 1: Check if this is an invite link visit ──────────────────────
+    // Do this BEFORE checking localStorage so invite links always work
+    var urlRef  = getUrlParam("ref");
+    var urlMode = getUrlParam("mode");
+    var isInviteLink = urlRef && urlMode === "signup";
+
+    if (isInviteLink) {
+      // Someone clicked an invite link — skip landing page, go straight to login/signup
+      console.log("[App] Invite link detected → ref:", urlRef, "| skipping landing page");
+      setShowLanding(false);
+      setShowLogin(true);
+      setLoading(false);
+      return; // Don't check localStorage — new user won't have a session
+    }
+
+    // ── STEP 2: Try restoring existing session ─────────────────────────────
     try {
       var s = localStorage.getItem("user");
       if (s) {
@@ -219,11 +243,21 @@ function App() {
     </div>
   );
 
+  // ── Show Login (handles both normal login + invite link signup) ────────────
   if (showLogin && !user) {
     return (
       <>
         <style>{GLOBAL_CSS}</style>
-        <Login onLoginSuccess={handleLoginSuccess} onBack={function(){ setShowLogin(false); setShowLanding(true); }}/>
+        <Login
+          onLoginSuccess={handleLoginSuccess}
+          onBack={function(){
+            // If they came from an invite link, don't go back to landing
+            var isInvite = getUrlParam("ref") && getUrlParam("mode") === "signup";
+            if (isInvite) return; // no back button for invite links
+            setShowLogin(false);
+            setShowLanding(true);
+          }}
+        />
       </>
     );
   }
@@ -272,7 +306,7 @@ function App() {
   );
 }
 
-// ── Global CSS (dark/light theme variables) ───────────────────────────────────
+// ── Global CSS ────────────────────────────────────────────────────────────────
 var GLOBAL_CSS = `
   *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
   html,body,#root { min-height:100vh; }
@@ -304,4 +338,3 @@ var GLOBAL_CSS = `
 `;
 
 export default App;
-

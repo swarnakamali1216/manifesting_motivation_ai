@@ -27,7 +27,44 @@ var TABS = [
   { id:"account",       label:"Account"       },
 ];
 
-// ── Browser TTS helper ────────────────────────────────────────────────────────
+// ── ElevenLabs key (called directly from browser — bypasses Render IP block) ─
+var ELEVENLABS_KEY = "PASTE_YOUR_NEW_KEY_HERE"; // ← replace with your new key
+
+// ── Direct browser → ElevenLabs TTS ──────────────────────────────────────────
+async function speakWithElevenLabs(text, voiceId, onEnd) {
+  try {
+    var resp = await fetch(
+      "https://api.elevenlabs.io/v1/text-to-speech/" + voiceId,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key":   ELEVENLABS_KEY,
+          "Content-Type": "application/json",
+          "Accept":       "audio/mpeg",
+        },
+        body: JSON.stringify({
+          text: text,
+          model_id: "eleven_turbo_v2_5",
+          voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+        }),
+      }
+    );
+    if (!resp.ok) throw new Error("EL " + resp.status);
+    var blob  = await resp.blob();
+    var url   = URL.createObjectURL(blob);
+    var audio = new Audio(url);
+    audio.onended = function(){ URL.revokeObjectURL(url); if (onEnd) onEnd(); };
+    audio.onerror = function(){ URL.revokeObjectURL(url); if (onEnd) onEnd(); throw new Error("audio error"); };
+    await audio.play();
+    return true;
+  } catch (e) {
+    console.warn("ElevenLabs direct failed:", e.message);
+    if (onEnd) onEnd();
+    return false;
+  }
+}
+
+// ── Browser TTS fallback ──────────────────────────────────────────────────────
 function speakWithBrowser(text, voiceId, onEnd) {
   try {
     window.speechSynthesis.cancel();
@@ -49,6 +86,19 @@ function speakWithBrowser(text, voiceId, onEnd) {
     u.onerror = function(){ if (onEnd) onEnd(); };
     window.speechSynthesis.speak(u);
   } catch(e) { if (onEnd) onEnd(); }
+}
+
+// ── Speak helper: tries ElevenLabs first, falls back to browser ───────────────
+// Use this anywhere in your app instead of calling /api/speak
+export async function speakText(text, voiceId, onEnd) {
+  if (!voiceId) voiceId = localStorage.getItem("voice_persona") || "ErXwobaYiN019PkySvjV";
+  var ok = await speakWithElevenLabs(text, voiceId, null);
+  if (!ok) {
+    speakWithBrowser(text, voiceId, onEnd);
+  } else {
+    if (onEnd) onEnd();
+  }
+  return ok;
 }
 
 function Toggle({ value, onChange, color }) {
@@ -93,7 +143,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
   var [notifEnabled, setNotifEnabled] = useState(localStorage.getItem("notif_enabled") === "true");
   var [streakNum,    setStreakNum]     = useState(0);
   var [testingVoice, setTestingVoice] = useState(false);
-  // "elevenlabs" | "browser" | "error" | ""
+  // "elevenlabs" | "browser" | ""
   var [voiceSource,  setVoiceSource]  = useState("");
 
   useEffect(function(){
@@ -130,51 +180,57 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
     localStorage.setItem("voice_auto", String(val));
   }
 
-  function handleTestVoice() {
+  // ── Test voice: calls ElevenLabs directly from browser ──────────────────────
+  async function handleTestVoice() {
     if (testingVoice) return;
     setTestingVoice(true);
     setVoiceSource("");
+
     var text = "Hello! I'm your AI coach. Let's achieve your goals together!";
 
-    axios.post(
-      API + "/speak",
-      { text: text, voice_id: voiceId },
-      {
-        responseType: "blob",
-        validateStatus: function(status) { return true; },
+    // 1. Try ElevenLabs directly (no backend, so Render IP block is irrelevant)
+    var ok = false;
+    try {
+      var resp = await fetch(
+        "https://api.elevenlabs.io/v1/text-to-speech/" + voiceId,
+        {
+          method: "POST",
+          headers: {
+            "xi-api-key":   ELEVENLABS_KEY,
+            "Content-Type": "application/json",
+            "Accept":       "audio/mpeg",
+          },
+          body: JSON.stringify({
+            text: text,
+            model_id: "eleven_turbo_v2_5",
+            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+          }),
+        }
+      );
+
+      if (resp.ok) {
+        var blob  = await resp.blob();
+        var url   = URL.createObjectURL(blob);
+        var audio = new Audio(url);
+        audio.onended = function(){ URL.revokeObjectURL(url); setTestingVoice(false); };
+        audio.onerror = function(){
+          URL.revokeObjectURL(url);
+          setVoiceSource("browser");
+          speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
+        };
+        await audio.play();
+        setVoiceSource("elevenlabs");
+        ok = true;
       }
-    ).then(function(r) {
-      // ElevenLabs unavailable — fall back to browser TTS
-      if (r.status !== 200) {
-        setVoiceSource("browser");
-        speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
-        return;
-      }
-      var contentType = r.headers["content-type"] || "";
-      if (contentType.includes("application/json")) {
-        setVoiceSource("browser");
-        speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
-        return;
-      }
-      // ElevenLabs audio received
-      setVoiceSource("elevenlabs");
-      var url   = URL.createObjectURL(r.data);
-      var audio = new Audio(url);
-      audio.onended = function(){ URL.revokeObjectURL(url); setTestingVoice(false); };
-      audio.onerror = function(){
-        URL.revokeObjectURL(url);
-        setVoiceSource("browser");
-        speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
-      };
-      audio.play().catch(function(){
-        URL.revokeObjectURL(url);
-        setVoiceSource("browser");
-        speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
-      });
-    }).catch(function() {
+    } catch (e) {
+      console.warn("ElevenLabs direct failed:", e.message);
+    }
+
+    // 2. Fallback to browser TTS
+    if (!ok) {
       setVoiceSource("browser");
       speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
-    });
+    }
   }
 
   function handleRequestNotif() {
@@ -269,7 +325,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                 {voiceAuto ? "🔊 AI voice is ON" : "🔇 AI voice is OFF"}
               </div>
               <div style={{fontSize:12,color:"var(--muted)",lineHeight:1.6}}>
-                When ON: AI replies are spoken aloud via ElevenLabs or browser TTS.
+                When ON: AI replies are spoken aloud via ElevenLabs (direct) or browser TTS.
               </div>
             </div>
 
@@ -296,25 +352,15 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                   })}
                 </div>
 
-                {/* Voice source badge — shown after test */}
+                {/* Voice source badge */}
                 {voiceSource === "elevenlabs" && (
-                  <div style={{
-                    padding:"7px 11px", borderRadius:9, marginBottom:9,
-                    background:"rgba(74,222,128,0.08)",
-                    border:"1px solid rgba(74,222,128,0.2)",
-                    fontSize:11, color:"#4ade80", fontWeight:600,
-                  }}>
-                    ✅ Playing via ElevenLabs AI voice
+                  <div style={{padding:"7px 11px",borderRadius:9,marginBottom:9,background:"rgba(74,222,128,0.08)",border:"1px solid rgba(74,222,128,0.2)",fontSize:11,color:"#4ade80",fontWeight:600}}>
+                    ✅ Playing via ElevenLabs AI voice (direct)
                   </div>
                 )}
                 {voiceSource === "browser" && (
-                  <div style={{
-                    padding:"7px 11px", borderRadius:9, marginBottom:9,
-                    background:"rgba(251,191,36,0.08)",
-                    border:"1px solid rgba(251,191,36,0.25)",
-                    fontSize:11, color:"#fbbf24", fontWeight:600,
-                  }}>
-                    ⚠️ Using browser TTS — ElevenLabs currently unavailable
+                  <div style={{padding:"7px 11px",borderRadius:9,marginBottom:9,background:"rgba(251,191,36,0.08)",border:"1px solid rgba(251,191,36,0.25)",fontSize:11,color:"#fbbf24",fontWeight:600}}>
+                    ⚠️ Using browser TTS — ElevenLabs key may need updating
                   </div>
                 )}
 

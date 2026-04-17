@@ -29,57 +29,150 @@ def get_sender(user_id):
         print(f"[invite] get_sender error: {e}")
     return "Someone", ""
 
-def build_email_html(sender_name, invite_url):
+def build_email_html(sender_name, invite_url, ref_id):
     return f"""<!DOCTYPE html>
-<html>
-<body style="margin:0;padding:0;background:#0a0a1a;font-family:Arial,sans-serif;">
-  <table width="100%" style="padding:32px 16px;">
-  <tr><td align="center">
-    <table width="560" style="background:#0f0f20;border-radius:24px;border:1px solid #1a1a35;">
-      <tr>
-        <td style="background:linear-gradient(135deg,#1a0a3a,#2d0a4a);padding:40px;text-align:center;">
-          <h1 style="color:#fff;font-size:26px;margin:0;">Manifesting Motivation</h1>
-          <p style="color:#c4b5fd;margin:8px 0 0;">AI Coaching Platform</p>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:36px 40px;">
-          <p style="font-size:22px;font-weight:700;color:#eeeeff;">You have been invited!</p>
-          <p style="color:#9898c0;font-size:15px;line-height:1.75;">
-            <strong style="color:#c4b5fd;">{sender_name}</strong> wants you to join
-            <strong style="color:#fff;">Manifesting Motivation AI</strong> —
-            a personal growth app with AI coaching, goal tracking, and daily check-ins.
-          </p>
-          <table width="100%" style="margin:24px 0;">
-            <tr><td align="center">
-              <a href="{invite_url}"
-                style="display:inline-block;padding:16px 48px;
-                background:linear-gradient(135deg,#7c5cfc,#9c7cfc);
-                color:#fff;border-radius:100px;text-decoration:none;
-                font-size:16px;font-weight:700;">
-                Join Free — Start Your Journey
-              </a>
-            </td></tr>
-          </table>
-          <p style="text-align:center;color:#4a4a6a;font-size:12px;">
-            Or copy: <a href="{invite_url}" style="color:#7c5cfc;">{invite_url}</a>
-          </p>
-          <div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:12px;padding:14px 18px;margin-top:20px;">
-            <p style="color:#4ade80;font-size:13px;font-weight:700;margin:0;">Welcome bonus: +25 XP when you sign up!</p>
-          </div>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#070712;padding:20px 40px;text-align:center;">
-          <p style="color:#3a3a5a;font-size:11px;margin:0;">Manifesting Motivation AI — Built with love in India</p>
-        </td>
-      </tr>
-    </table>
-  </td></tr>
-  </table>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>You're Invited!</title>
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ background:#06060f; font-family:'Segoe UI',Arial,sans-serif; }}
+  .wrapper {{ width:100%; background:#06060f; padding:40px 16px; }}
+  .container {{ max-width:580px; margin:0 auto; background:#0c0c1e; border-radius:28px; overflow:hidden; border:1px solid rgba(139,92,246,0.25); box-shadow:0 32px 80px rgba(0,0,0,0.6); }}
+  .header {{ background:linear-gradient(160deg,#0d0520 0%,#160830 40%,#1e0635 70%,#0d0520 100%); padding:52px 40px 44px; text-align:center; position:relative; border-bottom:1px solid rgba(139,92,246,0.15); }}
+  .logo-wrap {{ margin-bottom:20px; }}
+  .brand-name {{ color:#ffffff; font-size:26px; font-weight:800; letter-spacing:-0.5px; margin-bottom:6px; }}
+  .brand-sub {{ color:rgba(196,181,253,0.55); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; }}
+  .invite-badge {{ display:inline-block; margin-top:22px; background:linear-gradient(135deg,rgba(124,92,252,0.18),rgba(236,72,153,0.12)); border:1px solid rgba(139,92,246,0.35); border-radius:50px; padding:9px 28px; color:#c4b5fd; font-size:12px; font-weight:700; letter-spacing:0.06em; }}
+  .body {{ padding:44px 40px; }}
+  .greeting {{ color:#eeeeff; font-size:26px; font-weight:800; letter-spacing:-0.5px; margin-bottom:14px; }}
+  .intro {{ color:#7878a8; font-size:15px; line-height:1.85; margin-bottom:32px; }}
+  .intro strong {{ color:#c4b5fd; }}
+  .intro strong.white {{ color:#eeeeff; }}
+  .features-box {{ background:linear-gradient(135deg,rgba(124,92,252,0.05),rgba(236,72,153,0.03)); border:1px solid rgba(124,92,252,0.15); border-radius:18px; padding:22px 26px; margin-bottom:34px; }}
+  .features-label {{ color:#7c5cfc; font-size:10px; font-weight:800; letter-spacing:0.16em; text-transform:uppercase; margin-bottom:18px; }}
+  .feature-row {{ display:block; padding:9px 0; color:#a89ed0; font-size:14px; line-height:1.5; border-bottom:1px solid rgba(255,255,255,0.04); }}
+  .feature-row:last-child {{ border-bottom:none; padding-bottom:0; }}
+  .cta-wrap {{ text-align:center; margin-bottom:20px; }}
+  .cta-btn {{ display:inline-block; padding:18px 56px; background:linear-gradient(135deg,#7c5cfc 0%,#a855f7 50%,#ec4899 100%); color:#ffffff !important; border-radius:100px; text-decoration:none !important; font-size:16px; font-weight:800; letter-spacing:-0.2px; box-shadow:0 12px 40px rgba(124,92,252,0.45); }}
+  .link-box {{ background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:14px 18px; text-align:center; margin-bottom:28px; }}
+  .link-box p {{ color:#3a3a5a; font-size:11px; margin-bottom:6px; }}
+  .link-box a {{ color:#7c5cfc; font-size:11px; word-break:break-all; text-decoration:none; }}
+  .bonus-box {{ background:linear-gradient(135deg,rgba(74,222,128,0.05),rgba(16,185,129,0.03)); border:1px solid rgba(74,222,128,0.2); border-radius:16px; padding:18px 22px; margin-bottom:28px; display:table; width:100%; }}
+  .bonus-icon {{ display:table-cell; width:36px; vertical-align:middle; font-size:22px; }}
+  .bonus-text {{ display:table-cell; vertical-align:middle; padding-left:12px; }}
+  .bonus-text p {{ color:#4ade80; font-size:14px; font-weight:800; margin-bottom:3px; }}
+  .bonus-text span {{ color:#2a5a3a; font-size:12px; }}
+  .stats-wrap {{ margin-bottom:8px; border-radius:16px; overflow:hidden; border:1px solid rgba(255,255,255,0.05); }}
+  .stats-table {{ width:100%; border-collapse:collapse; }}
+  .stats-table td {{ padding:18px 8px; text-align:center; background:rgba(255,255,255,0.02); border-right:1px solid rgba(255,255,255,0.05); }}
+  .stats-table td:last-child {{ border-right:none; }}
+  .stat-num {{ font-size:22px; font-weight:900; margin-bottom:5px; }}
+  .stat-lbl {{ color:#3a3a5a; font-size:9px; font-weight:800; letter-spacing:0.1em; text-transform:uppercase; }}
+  .footer {{ background:#070710; padding:26px 40px; border-top:1px solid rgba(255,255,255,0.04); text-align:center; }}
+  .footer p {{ color:#2a2a42; font-size:11px; line-height:1.8; }}
+  .footer span {{ color:#4a4a70; }}
+  .divider {{ height:1px; background:linear-gradient(90deg,transparent,rgba(124,92,252,0.2),transparent); margin:32px 0; }}
+  @media only screen and (max-width:600px) {{
+    .wrapper {{ padding:16px 10px !important; }}
+    .container {{ border-radius:20px !important; }}
+    .header {{ padding:36px 22px 32px !important; }}
+    .brand-name {{ font-size:21px !important; }}
+    .body {{ padding:28px 20px !important; }}
+    .greeting {{ font-size:21px !important; }}
+    .intro {{ font-size:14px !important; }}
+    .cta-btn {{ padding:16px 28px !important; font-size:15px !important; display:block !important; }}
+    .features-box {{ padding:16px 18px !important; }}
+    .feature-row {{ font-size:13px !important; }}
+    .stat-num {{ font-size:18px !important; }}
+    .footer {{ padding:20px 18px !important; }}
+    .stats-table td {{ padding:12px 4px !important; }}
+    .bonus-box {{ padding:14px 16px !important; }}
+  }}
+</style>
+</head>
+<body>
+<div class="wrapper">
+<div class="container">
+
+  <div class="header">
+    <div class="logo-wrap">
+      <img src="https://manifesting-motivation-ai.vercel.app/butterfly-logo.png"
+           width="64" height="64" alt="Manifesting Motivation"
+           style="display:block;margin:0 auto;filter:drop-shadow(0 0 16px rgba(124,92,252,0.55));"/>
+    </div>
+    <div class="brand-name">Manifesting Motivation</div>
+    <div class="brand-sub">AI Coaching Platform · Dream it. Build it. Live it.</div>
+    <div class="invite-badge">✨ &nbsp; You have a special invite</div>
+  </div>
+
+  <div class="body">
+    <div class="greeting">Hey there! 👋</div>
+    <p class="intro">
+      <strong>{sender_name}</strong> thinks you'd love
+      <strong class="white">Manifesting Motivation AI</strong> —
+      a personal growth platform with AI coaching, goal tracking,
+      mood check-ins and gamified progress. Completely free to join.
+    </p>
+
+    <div class="features-box">
+      <div class="features-label">What you get for free</div>
+      <span class="feature-row">🤖 &nbsp; AI coach that adapts to your emotions daily</span>
+      <span class="feature-row">🎯 &nbsp; Personalised goal roadmaps, step by step</span>
+      <span class="feature-row">📔 &nbsp; Private journal with AI emotional insight</span>
+      <span class="feature-row">✅ &nbsp; Daily check-ins with streaks and XP</span>
+      <span class="feature-row">🏆 &nbsp; Badges, levels, and gamified growth</span>
+    </div>
+
+    <div class="cta-wrap">
+      <a href="https://manifesting-motivation-ai.vercel.app/?ref={ref_id}&mode=signup" class="cta-btn">
+        Join Free &mdash; Start Your Journey &nbsp;✨
+      </a>
+    </div>
+
+    <div class="link-box">
+      <p>Or copy this link into your browser</p>
+      <a href="https://manifesting-motivation-ai.vercel.app/?ref={ref_id}&mode=signup">
+        manifesting-motivation-ai.vercel.app/?ref={ref_id}&mode=signup
+      </a>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="bonus-box">
+      <div class="bonus-icon">⚡</div>
+      <div class="bonus-text">
+        <p>Welcome Bonus: +25 XP the moment you sign up!</p>
+        <span>{sender_name} also earns +50 XP when you join 🎉</span>
+      </div>
+    </div>
+
+    <div class="stats-wrap">
+      <table class="stats-table">
+        <tr>
+          <td><div class="stat-num" style="color:#7c5cfc;">50+</div><div class="stat-lbl">Badges</div></td>
+          <td><div class="stat-num" style="color:#4ade80;">24/7</div><div class="stat-lbl">AI Coach</div></td>
+          <td><div class="stat-num" style="color:#fbbf24;">15</div><div class="stat-lbl">Levels</div></td>
+          <td><div class="stat-num" style="color:#fb923c;">100%</div><div class="stat-lbl">Free</div></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>Invited by &nbsp;<span>{sender_name}</span></p>
+    <p style="margin-top:6px;color:#1e1e32;font-size:10px;">
+      Manifesting Motivation AI &nbsp;·&nbsp; Built with 🦋 in India<br/>
+      Not interested? Simply ignore this email.
+    </p>
+  </div>
+
+</div>
+</div>
 </body>
 </html>"""
-
 
 @invite_bp.route("/invite/send", methods=["POST", "OPTIONS"])
 def send_invite():
@@ -138,7 +231,8 @@ def send_invite():
                     "from": "Manifesting Motivation <onboarding@resend.dev>",
                     "to": [to_email],
                     "subject": f"{sender_name} invited you to Manifesting Motivation AI",
-                    "html": build_email_html(sender_name, invite_url)
+                    # NEW
+                    "html": build_email_html(sender_name, invite_url, user_id)
                 },
                 timeout=15
             )

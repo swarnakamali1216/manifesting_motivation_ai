@@ -11,13 +11,12 @@ var ACCENT_COLORS = [
   { name:"pink",   label:"Pink",   hex:"#ec4899" },
 ];
 
-// ── FIXED: voice IDs now match backend FREE_VOICES whitelist exactly ──────────
+// Only voices confirmed working on free tier
 var VOICE_OPTIONS = [
-  { id:"21m00Tcm4TlvDq8ikWAM", name:"Sarah",  desc:"Warm & encouraging"  },
-  { id:"pNInz6obpgDQGcFmaJgB", name:"Adam",   desc:"Neutral male"        },
-  { id:"MF3mGyEYCl7XYWbV9V6O", name:"Elli",   desc:"Bright & uplifting"  },
-  { id:"TxGEqnHWrfWFTfGW9XjX", name:"Josh",   desc:"Deep & motivating"   },
-  { id:"ErXwobaYiN019PkySvjV", name:"Antoni", desc:"Well-rounded male"   },
+  { id:"ErXwobaYiN019PkySvjV", name:"Antoni", desc:"Well-rounded male"  },
+  { id:"pNInz6obpgDQGcFmaJgB", name:"Adam",   desc:"Neutral male"       },
+  { id:"MF3mGyEYCl7XYWbV9V6O", name:"Elli",   desc:"Bright & uplifting" },
+  { id:"VR6AewLTigWG4xSOukaG", name:"Arnold", desc:"Crisp male"         },
 ];
 
 var TABS = [
@@ -33,7 +32,7 @@ var TABS = [
 function speakWithBrowser(text, voiceId, onEnd) {
   try {
     window.speechSynthesis.cancel();
-    var femaleIds = ["21m00Tcm4TlvDq8ikWAM","MF3mGyEYCl7XYWbV9V6O"];
+    var femaleIds = ["MF3mGyEYCl7XYWbV9V6O"];
     var isFemale  = femaleIds.includes(voiceId);
     var voices    = window.speechSynthesis.getVoices();
     var enVoices  = voices.filter(function(v){ return v.lang && v.lang.startsWith("en"); });
@@ -86,17 +85,17 @@ function Row({ label, sub, right, onClick }) {
 function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
   var uid = user ? user.id : null;
 
-  var [isDark,        setIsDark]        = useState(function(){ return localStorage.getItem("theme") !== "light"; });
-  var [tab,           setTab]           = useState("appearance");
-  var [accentColor,   setAccentColor]   = useState(localStorage.getItem("accent_color")||"purple");
-  var [voiceAuto,     setVoiceAuto]     = useState(localStorage.getItem("voice_auto")==="true");
-  // FIXED: default voice ID is now Sarah from the correct whitelist
-  var [voiceId,       setVoiceId]       = useState(localStorage.getItem("voice_persona")||"21m00Tcm4TlvDq8ikWAM");
-  var [notifPerm,     setNotifPerm]     = useState(typeof Notification!=="undefined"?Notification.permission:"default");
-  var [notifEnabled,  setNotifEnabled]  = useState(localStorage.getItem("notif_enabled")==="true");
-  var [streakNum,     setStreakNum]      = useState(0);
-  var [testingVoice,  setTestingVoice]  = useState(false);
-  var [voiceSource,   setVoiceSource]   = useState("");
+  // ── ALL useState calls inside the component ───────────────────────────────
+  var [isDark,       setIsDark]       = useState(function(){ return localStorage.getItem("theme") !== "light"; });
+  var [tab,          setTab]          = useState("appearance");
+  var [accentColor,  setAccentColor]  = useState(localStorage.getItem("accent_color")||"purple");
+  var [voiceAuto,    setVoiceAuto]    = useState(localStorage.getItem("voice_auto")==="true");
+  var [voiceId,      setVoiceId]      = useState(localStorage.getItem("voice_persona")||"ErXwobaYiN019PkySvjV");
+  var [notifPerm,    setNotifPerm]    = useState(typeof Notification!=="undefined"?Notification.permission:"default");
+  var [notifEnabled, setNotifEnabled] = useState(localStorage.getItem("notif_enabled")==="true");
+  var [streakNum,    setStreakNum]     = useState(0);
+  var [testingVoice, setTestingVoice] = useState(false);
+  var [voiceSource,  setVoiceSource]  = useState("");
 
   useEffect(function(){
     setIsDark(localStorage.getItem("theme") !== "light");
@@ -132,7 +131,6 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
     localStorage.setItem("voice_auto", String(val));
   }
 
-  // FIXED: sends voice_id (not voice_name), uses correct whitelist IDs
   function handleTestVoice() {
     if (testingVoice) return;
     setTestingVoice(true);
@@ -141,7 +139,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
 
     axios.post(
       API+"/speak",
-      { text: text, voice_id: voiceId },   // ← FIXED: voice_id not voice_name
+      { text: text, voice_id: voiceId },
       {
         responseType: "blob",
         validateStatus: function(status) { return true; },
@@ -152,15 +150,12 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
         speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
         return;
       }
-
       var contentType = r.headers["content-type"] || "";
       if (contentType.includes("application/json")) {
         setVoiceSource("browser");
         speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
         return;
       }
-
-      // ElevenLabs audio — play it and show green badge
       setVoiceSource("elevenlabs");
       var url   = URL.createObjectURL(r.data);
       var audio = new Audio(url);

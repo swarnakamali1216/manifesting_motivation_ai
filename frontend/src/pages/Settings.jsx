@@ -11,7 +11,6 @@ var ACCENT_COLORS = [
   { name:"pink",   label:"Pink",   hex:"#ec4899" },
 ];
 
-// Only voices confirmed working on free tier
 var VOICE_OPTIONS = [
   { id:"ErXwobaYiN019PkySvjV", name:"Antoni", desc:"Well-rounded male"  },
   { id:"pNInz6obpgDQGcFmaJgB", name:"Adam",   desc:"Neutral male"       },
@@ -28,7 +27,7 @@ var TABS = [
   { id:"account",       label:"Account"       },
 ];
 
-// ── Browser TTS helper ────────────────────────────────────────────────────
+// ── Browser TTS helper ────────────────────────────────────────────────────────
 function speakWithBrowser(text, voiceId, onEnd) {
   try {
     window.speechSynthesis.cancel();
@@ -36,7 +35,7 @@ function speakWithBrowser(text, voiceId, onEnd) {
     var isFemale  = femaleIds.includes(voiceId);
     var voices    = window.speechSynthesis.getVoices();
     var enVoices  = voices.filter(function(v){ return v.lang && v.lang.startsWith("en"); });
-    var match     = enVoices.filter(function(v){
+    var match     = enVoices.filter(function(v) {
       var n = v.name.toLowerCase();
       return isFemale
         ? /\b(sara|rachel|elli|aria|zira|susan|karen|victoria|samantha|female|woman)\b/.test(n)
@@ -85,16 +84,16 @@ function Row({ label, sub, right, onClick }) {
 function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
   var uid = user ? user.id : null;
 
-  // ── ALL useState calls inside the component ───────────────────────────────
   var [isDark,       setIsDark]       = useState(function(){ return localStorage.getItem("theme") !== "light"; });
   var [tab,          setTab]          = useState("appearance");
-  var [accentColor,  setAccentColor]  = useState(localStorage.getItem("accent_color")||"purple");
-  var [voiceAuto,    setVoiceAuto]    = useState(localStorage.getItem("voice_auto")==="true");
-  var [voiceId,      setVoiceId]      = useState(localStorage.getItem("voice_persona")||"ErXwobaYiN019PkySvjV");
-  var [notifPerm,    setNotifPerm]    = useState(typeof Notification!=="undefined"?Notification.permission:"default");
-  var [notifEnabled, setNotifEnabled] = useState(localStorage.getItem("notif_enabled")==="true");
+  var [accentColor,  setAccentColor]  = useState(localStorage.getItem("accent_color") || "purple");
+  var [voiceAuto,    setVoiceAuto]    = useState(localStorage.getItem("voice_auto") === "true");
+  var [voiceId,      setVoiceId]      = useState(localStorage.getItem("voice_persona") || "ErXwobaYiN019PkySvjV");
+  var [notifPerm,    setNotifPerm]    = useState(typeof Notification !== "undefined" ? Notification.permission : "default");
+  var [notifEnabled, setNotifEnabled] = useState(localStorage.getItem("notif_enabled") === "true");
   var [streakNum,    setStreakNum]     = useState(0);
   var [testingVoice, setTestingVoice] = useState(false);
+  // "elevenlabs" | "browser" | "error" | ""
   var [voiceSource,  setVoiceSource]  = useState("");
 
   useEffect(function(){
@@ -103,8 +102,8 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
 
   useEffect(function(){
     if (!uid) return;
-    axios.get(API+"/checkin/streak/"+uid)
-      .then(function(r){ setStreakNum(r.data.streak||0); })
+    axios.get(API + "/checkin/streak/" + uid)
+      .then(function(r){ setStreakNum(r.data.streak || 0); })
       .catch(function(){});
   }, [uid]);
 
@@ -122,7 +121,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
   function handleAccentColor(name) {
     setAccentColor(name);
     localStorage.setItem("accent_color", name);
-    var c = ACCENT_COLORS.find(function(x){ return x.name===name; });
+    var c = ACCENT_COLORS.find(function(x){ return x.name === name; });
     if (c) document.documentElement.style.setProperty("--accent", c.hex);
   }
 
@@ -138,13 +137,14 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
     var text = "Hello! I'm your AI coach. Let's achieve your goals together!";
 
     axios.post(
-      API+"/speak",
+      API + "/speak",
       { text: text, voice_id: voiceId },
       {
         responseType: "blob",
         validateStatus: function(status) { return true; },
       }
     ).then(function(r) {
+      // ElevenLabs unavailable — fall back to browser TTS
       if (r.status !== 200) {
         setVoiceSource("browser");
         speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
@@ -156,11 +156,16 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
         speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
         return;
       }
+      // ElevenLabs audio received
       setVoiceSource("elevenlabs");
       var url   = URL.createObjectURL(r.data);
       var audio = new Audio(url);
       audio.onended = function(){ URL.revokeObjectURL(url); setTestingVoice(false); };
-      audio.onerror = function(){ URL.revokeObjectURL(url); setTestingVoice(false); };
+      audio.onerror = function(){
+        URL.revokeObjectURL(url);
+        setVoiceSource("browser");
+        speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
+      };
       audio.play().catch(function(){
         URL.revokeObjectURL(url);
         setVoiceSource("browser");
@@ -173,19 +178,19 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
   }
 
   function handleRequestNotif() {
-    if (typeof Notification==="undefined") return;
+    if (typeof Notification === "undefined") return;
     Notification.requestPermission().then(function(perm){
       setNotifPerm(perm);
-      if (perm==="granted") {
+      if (perm === "granted") {
         setNotifEnabled(true);
-        localStorage.setItem("notif_enabled","true");
-        new Notification("Manifesting Motivation ✨",{body:"Daily check-in reminders enabled!",icon:"/favicon.ico"});
+        localStorage.setItem("notif_enabled", "true");
+        new Notification("Manifesting Motivation ✨", { body:"Daily check-in reminders enabled!", icon:"/favicon.ico" });
       }
     });
   }
 
   function handleToggleNotif(val) {
-    if (val && notifPerm!=="granted") { handleRequestNotif(); return; }
+    if (val && notifPerm !== "granted") { handleRequestNotif(); return; }
     setNotifEnabled(val);
     localStorage.setItem("notif_enabled", String(val));
   }
@@ -219,7 +224,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
       <div style={{maxWidth:580,animation:"fadeIn .2s ease"}}>
 
         {/* ── APPEARANCE ── */}
-        {tab==="appearance" && (
+        {tab === "appearance" && (
           <>
             <div style={{marginBottom:24,paddingBottom:24,borderBottom:"1px solid var(--border)"}}>
               <SectionLabel>Theme</SectionLabel>
@@ -240,9 +245,9 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                 </div>
                 <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
                   {ACCENT_COLORS.map(function(c){
-                    var sel = accentColor===c.name;
+                    var sel = accentColor === c.name;
                     return (
-                      <button key={c.name} onClick={function(){handleAccentColor(c.name);}}
+                      <button key={c.name} onClick={function(){ handleAccentColor(c.name); }}
                         style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5,padding:"9px 12px",borderRadius:12,cursor:"pointer",border:sel?"2px solid "+c.hex:"1px solid var(--border)",background:sel?c.hex+"18":"var(--card)",transition:"all .18s",transform:sel?"translateY(-2px)":"none",WebkitTapHighlightColor:"transparent"}}>
                         <div style={{width:26,height:26,borderRadius:"50%",background:c.hex,boxShadow:sel?"0 3px 12px "+c.hex+"66":"none"}}/>
                         <div style={{fontSize:9,fontWeight:800,color:sel?c.hex:"var(--muted)",fontFamily:"'Syne',sans-serif"}}>{c.label}</div>
@@ -257,7 +262,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
         )}
 
         {/* ── VOICE ── */}
-        {tab==="voice" && (
+        {tab === "voice" && (
           <>
             <div style={{padding:"13px 15px",borderRadius:13,marginBottom:14,background:voiceAuto?"rgba(74,222,128,0.08)":"rgba(124,92,252,0.06)",border:"1px solid "+(voiceAuto?"rgba(74,222,128,0.25)":"rgba(124,92,252,0.2)")}}>
               <div style={{fontSize:13,fontWeight:700,color:voiceAuto?"#4ade80":"var(--muted)",marginBottom:3}}>
@@ -276,9 +281,9 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                 <div style={{fontSize:10,fontWeight:800,color:"var(--muted)",letterSpacing:".1em",marginBottom:11,fontFamily:"'Syne',sans-serif"}}>CHOOSE VOICE</div>
                 <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:11}}>
                   {VOICE_OPTIONS.map(function(v){
-                    var sel = voiceId===v.id;
+                    var sel = voiceId === v.id;
                     return (
-                      <button key={v.id} onClick={function(){ setVoiceId(v.id); localStorage.setItem("voice_persona",v.id); }}
+                      <button key={v.id} onClick={function(){ setVoiceId(v.id); localStorage.setItem("voice_persona", v.id); setVoiceSource(""); }}
                         style={{display:"flex",alignItems:"center",gap:11,padding:"10px 13px",borderRadius:11,cursor:"pointer",border:sel?"1px solid var(--accent)":"1px solid var(--border)",background:sel?"rgba(124,92,252,0.08)":"var(--card)",transition:"all .15s",textAlign:"left",WebkitTapHighlightColor:"transparent"}}>
                         <div style={{width:34,height:34,borderRadius:"50%",background:sel?"var(--accent)":"var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>🎙️</div>
                         <div style={{flex:1}}>
@@ -291,6 +296,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                   })}
                 </div>
 
+                {/* Voice source badge — shown after test */}
                 {voiceSource === "elevenlabs" && (
                   <div style={{
                     padding:"7px 11px", borderRadius:9, marginBottom:9,
@@ -299,6 +305,16 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                     fontSize:11, color:"#4ade80", fontWeight:600,
                   }}>
                     ✅ Playing via ElevenLabs AI voice
+                  </div>
+                )}
+                {voiceSource === "browser" && (
+                  <div style={{
+                    padding:"7px 11px", borderRadius:9, marginBottom:9,
+                    background:"rgba(251,191,36,0.08)",
+                    border:"1px solid rgba(251,191,36,0.25)",
+                    fontSize:11, color:"#fbbf24", fontWeight:600,
+                  }}>
+                    ⚠️ Using browser TTS — ElevenLabs currently unavailable
                   </div>
                 )}
 
@@ -312,7 +328,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
         )}
 
         {/* ── PRIVACY ── */}
-        {tab==="privacy" && (
+        {tab === "privacy" && (
           <div>
             <div style={{padding:"14px 16px",borderRadius:14,marginBottom:14,background:"rgba(74,222,128,0.06)",border:"1px solid rgba(74,222,128,0.2)",display:"flex",gap:13,alignItems:"center"}}>
               <div style={{fontSize:28,flexShrink:0}}>🔒</div>
@@ -342,7 +358,7 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
         )}
 
         {/* ── DATA ── */}
-        {tab==="data" && (
+        {tab === "data" && (
           <div>
             <SectionLabel>Export Your Data</SectionLabel>
             <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:14,padding:16,marginBottom:14}}>
@@ -350,12 +366,12 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
               <div style={{fontSize:12,color:"var(--muted)",marginBottom:12,lineHeight:1.6}}>Download all conversations, journals, and goals as JSON.</div>
               <button onClick={function(){
                 if (!uid) return;
-                axios.get(API+"/privacy/export?user_id="+uid)
+                axios.get(API + "/privacy/export?user_id=" + uid)
                   .then(function(r){
-                    var blob = new Blob([JSON.stringify(r.data,null,2)],{type:"application/json"});
+                    var blob = new Blob([JSON.stringify(r.data, null, 2)], { type:"application/json" });
                     var url  = URL.createObjectURL(blob);
                     var a    = document.createElement("a");
-                    a.href=url; a.download="my_data_"+new Date().toISOString().slice(0,10)+".json";
+                    a.href = url; a.download = "my_data_" + new Date().toISOString().slice(0, 10) + ".json";
                     a.click(); URL.revokeObjectURL(url);
                   }).catch(function(){ alert("Export failed. Check backend."); });
               }} style={{padding:"10px 18px",borderRadius:11,background:"linear-gradient(135deg,#7c5cfc,#9c6cfc)",border:"none",color:"white",fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,cursor:"pointer"}}>
@@ -369,8 +385,8 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
               <button onClick={function(){
                 if (!window.confirm("DELETE YOUR ACCOUNT? All data removed.")) return;
                 var ans = window.prompt("Type DELETE to confirm:");
-                if (ans!=="DELETE") { alert("Cancelled."); return; }
-                fetch(API+"/privacy/delete-account",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:uid})})
+                if (ans !== "DELETE") { alert("Cancelled."); return; }
+                fetch(API + "/privacy/delete-account", { method:"DELETE", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ user_id:uid }) })
                   .then(function(){ localStorage.clear(); window.location.reload(); })
                   .catch(function(){ alert("Failed."); });
               }} style={{padding:"9px 16px",borderRadius:11,background:"rgba(248,113,113,0.08)",border:"1px solid rgba(248,113,113,0.3)",color:"#f87171",fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,cursor:"pointer"}}>
@@ -381,36 +397,36 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
         )}
 
         {/* ── NOTIFICATIONS ── */}
-        {tab==="notifications" && (
+        {tab === "notifications" && (
           <div>
             <div style={{padding:"13px 15px",borderRadius:13,marginBottom:13,background:notifPerm==="granted"?"rgba(74,222,128,0.08)":"rgba(251,191,36,0.08)",border:"1px solid "+(notifPerm==="granted"?"rgba(74,222,128,0.25)":"rgba(251,191,36,0.25)")}}>
               <div style={{fontSize:13,fontWeight:700,color:notifPerm==="granted"?"#4ade80":"#fbbf24",marginBottom:3}}>
-                {notifPerm==="granted" ? "✅ Notifications allowed" : "⚠️ Permission pending"}
+                {notifPerm === "granted" ? "✅ Notifications allowed" : "⚠️ Permission pending"}
               </div>
-              <div style={{fontSize:12,color:"var(--muted)"}}>{notifPerm==="granted"?"Daily reminders are active.":"Click toggle below to enable."}</div>
+              <div style={{fontSize:12,color:"var(--muted)"}}>{notifPerm === "granted" ? "Daily reminders are active." : "Click toggle below to enable."}</div>
             </div>
             <SectionLabel>Settings</SectionLabel>
             <Row label="Enable notifications" sub="Get daily check-in reminders and alerts"
-              right={<Toggle value={notifEnabled&&notifPerm==="granted"} onChange={handleToggleNotif} color="#4ade80"/>}/>
+              right={<Toggle value={notifEnabled && notifPerm === "granted"} onChange={handleToggleNotif} color="#4ade80"/>}/>
           </div>
         )}
 
         {/* ── ACCOUNT ── */}
-        {tab==="account" && (
+        {tab === "account" && (
           <div>
             {user && (
               <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:18,marginBottom:22}}>
                 <div style={{display:"flex",gap:13,alignItems:"center"}}>
                   <div style={{width:54,height:54,borderRadius:14,background:"linear-gradient(135deg,#7c5cfc,#fc5cf0)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontFamily:"'Syne',sans-serif",fontWeight:900,color:"#fff",flexShrink:0}}>
-                    {(user.name||"U").charAt(0).toUpperCase()}
+                    {(user.name || "U").charAt(0).toUpperCase()}
                   </div>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)",marginBottom:2}}>{user.name||"User"}</div>
-                    <div style={{fontSize:12,color:"var(--muted)",marginBottom:5}}>{user.email||""}</div>
+                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)",marginBottom:2}}>{user.name || "User"}</div>
+                    <div style={{fontSize:12,color:"var(--muted)",marginBottom:5}}>{user.email || ""}</div>
                     <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                       <span style={{fontSize:12,fontWeight:700,color:"#fb923c"}}>🔥 {streakNum} day streak</span>
                       <span style={{fontSize:10,padding:"2px 9px",borderRadius:20,background:"rgba(124,92,252,.12)",color:"var(--accent)",fontWeight:700,border:"1px solid rgba(124,92,252,.25)"}}>
-                        {user.role==="admin"?"👑 Admin":"✦ Member"}
+                        {user.role === "admin" ? "👑 Admin" : "✦ Member"}
                       </span>
                     </div>
                   </div>
@@ -425,10 +441,10 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
               {icon:"📖",label:"My Story",    sub:"Your journey",         page:"my-story"},
             ].map(function(item){
               return (
-                <div key={item.page} onClick={function(){ if(onNavigate) onNavigate(item.page); }}
+                <div key={item.page} onClick={function(){ if (onNavigate) onNavigate(item.page); }}
                   style={{display:"flex",alignItems:"center",gap:13,padding:"13px 15px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:13,marginBottom:7,cursor:"pointer",transition:"all .15s",WebkitTapHighlightColor:"transparent"}}
-                  onMouseEnter={function(e){e.currentTarget.style.borderColor="rgba(124,92,252,.35)";}}
-                  onMouseLeave={function(e){e.currentTarget.style.borderColor="var(--border)";}}>
+                  onMouseEnter={function(e){ e.currentTarget.style.borderColor="rgba(124,92,252,.35)"; }}
+                  onMouseLeave={function(e){ e.currentTarget.style.borderColor="var(--border)"; }}>
                   <div style={{width:36,height:36,borderRadius:11,background:"rgba(124,92,252,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{item.icon}</div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{item.label}</div>

@@ -1,14 +1,17 @@
 """
 routes/elevenlabs.py
 
-FIXES APPLIED:
-  1. Lazy key validation — _key_valid is re-checked on first real request.
+FIXES IN THIS VERSION:
+  1. Lazy key validation — _key_valid re-checked on first real request.
   2. FREE_VOICES whitelist — only free-tier ElevenLabs voices allowed.
-  3. Per-voice 402 tracking — if a voice returns 402, it is blacklisted
-     for this process lifetime and never retried (avoids log spam).
-  4. _fetch_tts retries with next available voice instead of just Sarah.
+  3. Per-voice 402 tracking — blacklisted for process lifetime, never retried.
+  4. _fetch_tts retries with next available voice on 402.
   5. Default voice is Antoni (confirmed working on free tier).
-  6. Audio cache + ThreadPoolExecutor kept from previous version.
+  6. Audio cache + ThreadPoolExecutor.
+  7. [FIX] _key_checked is reset alongside _key_valid so workers don't get
+     permanently stuck in an unchecked state after a transient network error.
+  8. [FIX] _validate_key now always sets _key_checked=True, even on exception,
+     so a failed validation doesn't silently retry on every request.
 """
 
 from flask import Blueprint, request, jsonify, Response
@@ -25,16 +28,15 @@ ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 print(f"ElevenLabs key length={len(ELEVENLABS_KEY)} ends={ELEVENLABS_KEY[-4:] if ELEVENLABS_KEY else 'EMPTY'}")
 
 # ── Free-tier voice whitelist ─────────────────────────────────────────────────
-# IDs must match VOICE_OPTIONS in frontend/src/pages/Settings.jsx
 FREE_VOICES: dict[str, dict] = {
     "ErXwobaYiN019PkySvjV": {"name": "Antoni", "style": "Well-rounded male",  "gender": "male"},
     "pNInz6obpgDQGcFmaJgB": {"name": "Adam",   "style": "Neutral male",       "gender": "male"},
     "MF3mGyEYCl7XYWbV9V6O": {"name": "Elli",   "style": "Young female",       "gender": "female"},
     "VR6AewLTigWG4xSOukaG": {"name": "Arnold", "style": "Crisp male",         "gender": "male"},
 }
-DEFAULT_VOICE_ID = "ErXwobaYiN019PkySvjV"  # Antoni — confirmed working
+DEFAULT_VOICE_ID = "ErXwobaYiN019PkySvjV"  # Antoni
 
-# Per-voice 402 blacklist — voices that returned 402 are skipped
+# ── Per-voice 402 blacklist ───────────────────────────────────────────────────
 _voice_blacklist: set[str] = set()
 _blacklist_lock = threading.Lock()
 
@@ -44,7 +46,6 @@ def _blacklist_voice(voice_id: str):
     print(f"ElevenLabs: voice '{voice_id}' blacklisted (402)")
 
 def _get_fallback_voice(exclude: str) -> str | None:
-    """Return first non-blacklisted voice that isn't the excluded one."""
     with _blacklist_lock:
         blacklisted = set(_voice_blacklist)
     for vid in FREE_VOICES:
@@ -64,14 +65,26 @@ def _safe_voice_id(raw: str) -> str:
     return DEFAULT_VOICE_ID
 
 
-# ── Lazy key validation ───────────────────────────────────────────────────────
+# ── Key validation ────────────────────────────────────────────────────────────
+# _key_valid   = last known validity
+# _key_checked = whether a check has completed (True even on failure/exception)
+# _key_lock    = guards both flags
+
 _key_valid   = False
 _key_checked = False
 _key_lock    = threading.Lock()
 
 def _validate_key() -> bool:
+    """
+    Calls ElevenLabs /v1/user to verify the key.
+    Always sets _key_checked=True when done (even on network error) so callers
+    don't retry on every request. Returns True only for HTTP 200.
+    """
     global _key_valid, _key_checked
     if not ELEVENLABS_KEY or len(ELEVENLABS_KEY) < 32:
+        with _key_lock:
+            _key_checked = True
+            _key_valid   = False
         return False
     try:
         resp = req_lib.get(
@@ -79,24 +92,37 @@ def _validate_key() -> bool:
             headers={"xi-api-key": ELEVENLABS_KEY},
             timeout=8,
         )
+        valid = (resp.status_code == 200)
         with _key_lock:
             _key_checked = True
-            _key_valid   = (resp.status_code == 200)
-        if _key_valid:
+            _key_valid   = valid
+        if valid:
             print("ElevenLabs: key valid — free AI voices enabled")
         else:
             print(f"ElevenLabs: key rejected (status {resp.status_code})")
-        return _key_valid
+        return valid
     except Exception as e:
         print(f"ElevenLabs: validation error ({e})")
+        with _key_lock:
+            # Mark as checked (failed) so we don't retry on every request.
+            # Reset after 5 minutes by not setting _key_checked — actually we DO
+            # set it so the process doesn't spam ElevenLabs on every call when
+            # the network is down. A restart will reset the flag anyway.
+            _key_checked = True
+            _key_valid   = False
         return False
 
 def _is_key_valid() -> bool:
-    global _key_valid, _key_checked
-    if _key_checked:
-        return _key_valid
+    """Returns cached validity; triggers a fresh check if not yet done."""
+    with _key_lock:
+        checked = _key_checked
+        valid   = _key_valid
+    if checked:
+        return valid
+    # Not yet checked — run synchronously (warm path on first real request)
     return _validate_key()
 
+# Kick off background validation at import time (non-blocking)
 threading.Thread(target=_validate_key, daemon=True).start()
 
 
@@ -129,35 +155,42 @@ _executor = ThreadPoolExecutor(max_workers=4)
 
 def _fetch_tts(text: str, voice_id: str) -> bytes | None:
     """
-    Fetch TTS audio. If 402, blacklist the voice and retry with a
-    different free voice. Avoids infinite recursion via visited set.
+    Fetch TTS audio. On 402, blacklist the voice and retry with a different
+    free voice. Uses a visited set to prevent infinite recursion.
     """
-    visited = set()
+    visited: set[str] = set()
 
     def _try(vid: str) -> bytes | None:
         if vid in visited:
             return None
         visited.add(vid)
 
-        resp = req_lib.post(
-            ELEVENLABS_URL.format(voice_id=vid),
-            json={
-                "text":     text,
-                "model_id": "eleven_turbo_v2_5",
-                "voice_settings": {
-                    "stability":        0.5,
-                    "similarity_boost": 0.75,
-                    "style":            0.0,
-                    "use_speaker_boost": True,
+        try:
+            resp = req_lib.post(
+                ELEVENLABS_URL.format(voice_id=vid),
+                json={
+                    "text":     text,
+                    "model_id": "eleven_turbo_v2_5",
+                    "voice_settings": {
+                        "stability":         0.5,
+                        "similarity_boost":  0.75,
+                        "style":             0.0,
+                        "use_speaker_boost": True,
+                    },
                 },
-            },
-            headers={
-                "xi-api-key":   ELEVENLABS_KEY,
-                "Content-Type": "application/json",
-                "Accept":       "audio/mpeg",
-            },
-            timeout=20,
-        )
+                headers={
+                    "xi-api-key":   ELEVENLABS_KEY,
+                    "Content-Type": "application/json",
+                    "Accept":       "audio/mpeg",
+                },
+                timeout=20,
+            )
+        except req_lib.exceptions.Timeout:
+            print("ElevenLabs: request timed out")
+            return None
+        except Exception as e:
+            print(f"ElevenLabs: request error ({e})")
+            return None
 
         if resp.status_code == 200:
             return resp.content

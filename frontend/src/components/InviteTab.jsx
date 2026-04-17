@@ -1,7 +1,5 @@
 import React, { useState } from "react";
 
-
-
 function InviteTab({ user }) {
   var [copied, setCopied] = useState(false);
 

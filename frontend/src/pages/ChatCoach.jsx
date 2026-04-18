@@ -427,7 +427,7 @@ export default function ChatCoach({ user }) {
             <option value="coach">💼 Coach</option>
             <option value="friend">🤝 Friend</option>
             <option value="motivational">🔥 Hype</option>
-            <option value="zen">🧘 Zen</option>
+            
           </select>
           <div style={{ fontSize:'10px', fontWeight:'700', color:'#4ade80', background:'rgba(74,222,128,0.1)', padding:'3px 8px', borderRadius:'8px', flexShrink:0 }}>● LIVE</div>
           {messages.length>0 && (

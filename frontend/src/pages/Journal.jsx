@@ -67,6 +67,17 @@ function getMood(key) {
   return MOODS.find(function(m) { return m.key === key; }) || null;
 }
 
+// ── Helper: resolve display title ─────────────────────────────────────────────
+function resolveTitle(entry) {
+  var t = entry.title;
+  if (!t) return formatDate(entry.created_at);
+  t = t.trim();
+  if (t.startsWith("*") || t.toLowerCase().startsWith("journal entry")) {
+    return formatDate(entry.created_at);
+  }
+  return t;
+}
+
 // ── Mood Streak ───────────────────────────────────────────────────────────────
 function MoodStreak({ entries }) {
   var days = {};
@@ -130,8 +141,9 @@ function EntryCard({ entry, onDelete, onEdit }) {
             <div style={{ fontSize:"22px", lineHeight:1 }} title={mood.label}>{mood.emoji}</div>
           )}
           <div>
+            {/* ✅ FIXED: single title line using resolveTitle helper */}
             <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:"700", fontSize:"13px", color:"var(--text)" }}>
-              {entry.title || formatDate(entry.created_at)}
+              {resolveTitle(entry)}
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:"6px", marginTop:"2px" }}>
               <span style={{ fontSize:"10px", color:"var(--muted)" }}>{formatDate(entry.created_at)}</span>
@@ -190,6 +202,14 @@ function EntryCard({ entry, onDelete, onEdit }) {
         )}
       </div>
 
+      {/* AI Insight */}
+      {entry.ai_insight && (
+        <div style={{ margin:"0 14px 12px", padding:"10px 12px", background:"rgba(124,92,252,0.06)", border:"1px solid rgba(124,92,252,0.15)", borderRadius:"10px" }}>
+          <div style={{ fontSize:"9px", color:"var(--accent)", fontWeight:"800", fontFamily:"'Syne',sans-serif", marginBottom:"4px" }}>✨ AI INSIGHT</div>
+          <div style={{ fontSize:"12px", color:"var(--text2)", lineHeight:"1.6" }}>{entry.ai_insight}</div>
+        </div>
+      )}
+
       {/* Mood bar */}
       {mood && (
         <div style={{ height:"3px", background:"linear-gradient(90deg,"+mood.color+"44,"+mood.color+")" }} />
@@ -221,9 +241,13 @@ function WriteModal({ user, editEntry, onClose, onSaved }) {
   function save() {
     if (!content.trim()) return;
     setSaving(true);
+    // ✅ FIXED: don't send bad titles — send empty string so backend uses date fallback
+    var cleanedTitle = (title && !title.trim().startsWith("*") && !title.trim().toLowerCase().startsWith("journal entry"))
+      ? title.trim()
+      : "";
     var payload = {
       user_id: user.id,
-      title:   title || new Date().toLocaleDateString("en-IN", { weekday:"long", day:"numeric", month:"long" }),
+      title:   cleanedTitle,
       content: content,
       mood:    mood,
       tags:    selTags.join(","),

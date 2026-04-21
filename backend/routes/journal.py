@@ -1,5 +1,5 @@
 """
-routes/journal.py — AES-256-GCM encryption + shared Groq pool
+routes/journal.py — AES-256-GCM encryption + shared Groq pool + RAG journal insights
 FIXES IN THIS VERSION:
   1. GET route logs the ACTUAL error before falling back (no more silent [])
   2. decrypt_journal never throws — safe placeholder if key missing
@@ -13,6 +13,7 @@ FIXES IN THIS VERSION:
  10. [FIX] POST RETURNING clause fetches created_at and converts to IST
  11. [FIX] Mobile: date-grouping works because the ISO string is consistent
  12. [FIX] Auto-migration: adds title+tags columns if missing on startup
+ 13. [NEW] RAG: retrieves past journal entries as context before AI insight
 """
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
@@ -71,6 +72,61 @@ def to_ist_iso(dt):
         return str(dt)
 
 
+def _clean_title(raw_title):
+    """
+    Returns None if the title looks like content accidentally saved as title
+    (e.g. '*Journal Entry – April 16, 2026*').
+    The frontend will then fall back to showing the formatted date.
+    """
+    if not raw_title:
+        return None
+    t = raw_title.strip()
+    if t.startswith("*") or t.lower().startswith("journal entry"):
+        return None
+    return t
+
+
+# ── RAG: fetch recent past entries as context ─────────────────────────────────
+def _get_rag_context(db, user_id, current_content, limit=3):
+    """
+    Retrieves up to `limit` recent past journal entries for the user
+    (excluding the current one being written) and returns them as a
+    formatted string to inject into the AI insight prompt.
+    """
+    try:
+        rows = db.execute(sql_text(
+            "SELECT content, mood, created_at "
+            "FROM journal_entries "
+            "WHERE user_id=:uid "
+            "ORDER BY created_at DESC "
+            "LIMIT :lim"
+        ), {"uid": user_id, "lim": limit}).fetchall()
+
+        if not rows:
+            return ""
+
+        parts = []
+        for r in rows:
+            try:
+                decrypted = decrypt_journal(r[0] or "")
+            except Exception:
+                decrypted = ""
+            if not decrypted:
+                continue
+            date_str = to_ist_iso(r[2])[:10] if r[2] else "unknown"
+            mood_str = r[1] or "unknown"
+            parts.append(f"[{date_str}, mood: {mood_str}] {decrypted[:150]}")
+
+        if not parts:
+            return ""
+
+        return "\n\nPast journal context (for reference only):\n" + "\n".join(parts)
+
+    except Exception as e:
+        print(f"[RAG context] {e}")
+        return ""
+
+
 # ── GET /journal ─────────────────────────────────────────────
 @journal_bp.route("/journal", methods=["GET"])
 def get_journal():
@@ -98,7 +154,7 @@ def get_journal():
                 result.append({
                     "id":         r[0],
                     "user_id":    r[1],
-                    "title":      r[2],
+                    "title":      _clean_title(r[2]),
                     "content":    decrypted,
                     "mood":       r[4],
                     "mood_score": r[5],
@@ -159,7 +215,7 @@ def add_journal():
     user_id = data.get("user_id")
     content = (data.get("content") or "").strip()
     mood    = data.get("mood", "okay")
-    title   = data.get("title", "")
+    title   = _clean_title(data.get("title", ""))
     tags    = data.get("tags", "")
 
     if not user_id or not content:
@@ -178,17 +234,22 @@ def add_journal():
         except Exception:
             pass
 
-        # STEP 2: AI insight on PLAINTEXT
+        # STEP 2: RAG — fetch past entries as context
+        rag_context = _get_rag_context(db, user_id, content, limit=3)
+
+        # STEP 3: AI insight on PLAINTEXT + RAG context
         ai_insight = None
         try:
             client = get_groq_client()
             resp   = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content":
-                    f"A student wrote this journal entry (mood: {mood}):\n\"{content[:400]}\"\n\n"
+                    f"A student wrote this journal entry (mood: {mood}):\n\"{content[:400]}\""
+                    f"{rag_context}\n\n"
                     "Give them one warm, specific, personal insight in 2 sentences. "
-                    "Acknowledge what they wrote specifically, then offer one encouraging observation."}],
-                max_tokens=100,
+                    "Acknowledge what they wrote specifically, then offer one encouraging observation. "
+                    "If past entries are provided, reference any relevant emotional pattern you notice."}],
+                max_tokens=120,
                 temperature=0.75,
                 timeout=15,
             )
@@ -196,10 +257,10 @@ def add_journal():
         except Exception as e:
             print(f"[journal AI insight] {e}")
 
-        # STEP 3: ENCRYPT for storage
+        # STEP 4: ENCRYPT for storage
         encrypted_content = encrypt_journal(content)
 
-        # STEP 4: INSERT
+        # STEP 5: INSERT
         try:
             row = db.execute(sql_text(
                 "INSERT INTO journal_entries (user_id, title, content, mood, mood_score, tags, ai_insight, created_at) "
@@ -256,7 +317,7 @@ def update_journal(entry_id):
     data    = request.get_json() or {}
     content = (data.get("content") or "").strip()
     mood    = data.get("mood", "okay")
-    title   = data.get("title", "")
+    title   = _clean_title(data.get("title", ""))
     tags    = data.get("tags", "")
     if not content:
         return jsonify({"error": "content required"}), 400

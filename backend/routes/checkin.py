@@ -109,7 +109,6 @@ def do_checkin():
     finally:
         db_ctx.close()
 
-    # CHANGED: get_groq_client() — reuses shared connection pool
     try:
         client   = get_groq_client()
         resp     = client.chat.completions.create(
@@ -133,6 +132,14 @@ def do_checkin():
         db_save.add(checkin)
         db_save.commit()
         print(f"[checkin] ✅ Saved check-in for user {user_id} mood={mood}")
+
+        # FIX: update streak in users table after every check-in
+        try:
+            from streak_utils import update_user_streak
+            update_user_streak(db_save, user_id)
+        except Exception as se:
+            print(f"[checkin] streak update error: {se}")
+
     except Exception as e:
         print(f"[checkin] ❌ Save failed: {e}")
         try: db_save.rollback()
@@ -300,7 +307,6 @@ def daily_nudge(user_id):
 
         if len(session_moods) >= 3 and goal_title:
             try:
-                # CHANGED: get_groq_client() — reuses shared connection pool
                 client   = get_groq_client()
                 ai_resp  = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",

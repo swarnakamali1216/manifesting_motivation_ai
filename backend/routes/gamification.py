@@ -1,5 +1,10 @@
 """
 routes/gamification.py — Fixed: total_goals and journals now fetched from real tables
+FIXES APPLIED:
+  1. pos_sessions: removed 'positive' (not a real emotion label), kept 'excited','focused','hopeful'
+  2. tough_sessions: removed 'negative' (not a real emotion label), added 'crisis'
+  3. mood_resilient tough_then_pos: fixed wrong emotion values ('negative' → 'crisis', 'positive' → 'focused')
+  4. invite_squad badge: added missing check ("invite_squad", invites_joined >= 3)
 """
 from flask import Blueprint, request, jsonify
 from models import SessionLocal
@@ -156,7 +161,10 @@ def check_and_award_badges(db, user_id):
         goals_done    = safe_count(db, "SELECT COUNT(*) FROM goals WHERE user_id=:uid AND (completed=TRUE OR is_complete=TRUE)", {"uid": user_id})
         journals      = safe_count(db, "SELECT COUNT(*) FROM journal_entries WHERE user_id=:uid", {"uid": user_id})
         checkins      = safe_count(db, "SELECT COUNT(*) FROM check_ins WHERE user_id=:uid", {"uid": user_id})
-        pos_sessions  = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid AND emotion IN ('positive','excited','hopeful')", {"uid": user_id})
+
+        # FIX 1: removed 'positive' (never stored by VADER), kept real labels
+        pos_sessions  = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid AND emotion IN ('excited','focused','hopeful')", {"uid": user_id})
+
         xp            = safe_count(db, "SELECT COALESCE(xp,0) FROM users WHERE id=:uid", {"uid": user_id})
         streak        = safe_count(db, "SELECT COALESCE(current_streak,0) FROM users WHERE id=:uid", {"uid": user_id})
 
@@ -166,8 +174,8 @@ def check_and_award_badges(db, user_id):
             invites_joined = r[0] if r else 0
         except Exception: pass
 
-        early_count = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid AND EXTRACT(HOUR FROM created_at) < 7", {"uid": user_id})
-        night_count = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid AND EXTRACT(HOUR FROM created_at) = 0", {"uid": user_id})
+        early_count   = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid AND EXTRACT(HOUR FROM created_at) < 7", {"uid": user_id})
+        night_count   = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid AND EXTRACT(HOUR FROM created_at) = 0", {"uid": user_id})
         night_journal = safe_count(db, "SELECT COUNT(*) FROM journal_entries WHERE user_id=:uid AND EXTRACT(HOUR FROM created_at) >= 22", {"uid": user_id})
 
         weekend_both = False
@@ -190,7 +198,12 @@ def check_and_award_badges(db, user_id):
         tough_then_pos = False
         try:
             emos = [r[0] for r in db.execute(sql_text("SELECT emotion FROM motivation_sessions WHERE user_id=:uid ORDER BY created_at DESC LIMIT 10"), {"uid": user_id}).fetchall()]
-            tough_then_pos = len(emos)>=4 and any(e in ("sad","stressed","negative") for e in emos[3:]) and emos[0] in ("positive","excited","hopeful")
+            # FIX 3: corrected emotion values — 'negative' → 'crisis', 'positive' → 'focused'
+            tough_then_pos = (
+                len(emos) >= 4
+                and any(e in ("sad", "stressed", "crisis") for e in emos[3:])
+                and emos[0] in ("excited", "focused", "hopeful")
+            )
         except Exception: pass
 
         mood_7_count = 0
@@ -216,6 +229,8 @@ def check_and_award_badges(db, user_id):
             ("xp_100", xp>=100), ("xp_500", xp>=500), ("xp_1000", xp>=1000),
             ("xp_5000", xp>=5000), ("xp_10000", xp>=10000), ("level_10", xp_to_level(xp)["level"]>=10),
             ("invite_1", invites_joined>=1), ("invite_5", invites_joined>=5), ("invite_10", invites_joined>=10),
+            # FIX 4: invite_squad was defined in ALL_BADGES but never checked — now added
+            ("invite_squad", invites_joined>=3),
             ("early_bird", early_count>=1), ("night_session", night_count>=1),
             ("comeback", comeback), ("weekend_warrior", weekend_both), ("all_rounder", persona_count>=5),
         ]
@@ -259,10 +274,14 @@ def user_gamification_stats(uid):
             done = raw_xp - current_lvl["xp_required"]
             progress_pct = round((done / max(1, span)) * 100, 1)
 
-        # ✅ KEY FIX: fetch real counts from actual tables
         total_sessions  = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid", {"uid": uid})
-        pos_sessions    = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid AND emotion IN ('positive','excited','hopeful')", {"uid": uid})
-        tough_sessions  = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid AND emotion IN ('negative','sad','stressed')", {"uid": uid})
+
+        # FIX 1 (also in stats endpoint): removed 'positive', added 'focused'
+        pos_sessions    = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid AND emotion IN ('excited','focused','hopeful')", {"uid": uid})
+
+        # FIX 2: removed 'negative' (never stored), added 'crisis'
+        tough_sessions  = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE user_id=:uid AND emotion IN ('sad','stressed','crisis')", {"uid": uid})
+
         total_goals     = safe_count(db, "SELECT COUNT(*) FROM goals WHERE user_id=:uid", {"uid": uid})
         goals_done      = safe_count(db, "SELECT COUNT(*) FROM goals WHERE user_id=:uid AND (completed=TRUE OR is_complete=TRUE)", {"uid": uid})
         total_journals  = safe_count(db, "SELECT COUNT(*) FROM journal_entries WHERE user_id=:uid", {"uid": uid})
@@ -290,9 +309,9 @@ def user_gamification_stats(uid):
             "total_sessions": total_sessions,
             "positive_sessions": pos_sessions,
             "tough_sessions": tough_sessions,
-            "total_goals": total_goals,        # ✅ real count
-            "goals_done": goals_done,           # ✅ real count
-            "journals": total_journals,         # ✅ real count
+            "total_goals": total_goals,
+            "goals_done": goals_done,
+            "journals": total_journals,
             "badges": enriched,
             "badges_earned": len(held_ids),
             "badges_total": len(ALL_BADGES),

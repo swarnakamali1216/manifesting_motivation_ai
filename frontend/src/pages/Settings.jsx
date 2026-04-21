@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
+import { notifyVoiceChanged } from "./voiceManager";
 
 var API = "https://manifesting-motivation-backend.onrender.com/api";
 
@@ -28,7 +29,7 @@ var TABS = [
 ];
 
 // ── ElevenLabs key (called directly from browser — bypasses Render IP block) ─
-var ELEVENLABS_KEY = "sk_bb688b60318d2be8f2e24c5f50b192b4501a66efe5c47257"; // ← replace with your new key
+var ELEVENLABS_KEY = "sk_bb688b60318d2be8f2e24c5f50b192b4501a66efe5c47257";
 
 // ── Direct browser → ElevenLabs TTS ──────────────────────────────────────────
 async function speakWithElevenLabs(text, voiceId, onEnd) {
@@ -54,7 +55,7 @@ async function speakWithElevenLabs(text, voiceId, onEnd) {
     var url   = URL.createObjectURL(blob);
     var audio = new Audio(url);
     audio.onended = function(){ URL.revokeObjectURL(url); if (onEnd) onEnd(); };
-    audio.onerror = function(){ URL.revokeObjectURL(url); if (onEnd) onEnd(); throw new Error("audio error"); };
+    audio.onerror = function(){ URL.revokeObjectURL(url); if (onEnd) onEnd(); };
     await audio.play();
     return true;
   } catch (e) {
@@ -89,7 +90,6 @@ function speakWithBrowser(text, voiceId, onEnd) {
 }
 
 // ── Speak helper: tries ElevenLabs first, falls back to browser ───────────────
-// Use this anywhere in your app instead of calling /api/speak
 export async function speakText(text, voiceId, onEnd) {
   if (!voiceId) voiceId = localStorage.getItem("voice_persona") || "ErXwobaYiN019PkySvjV";
   var ok = await speakWithElevenLabs(text, voiceId, null);
@@ -180,6 +180,20 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
     localStorage.setItem("voice_auto", String(val));
   }
 
+  // ── FIX: selecting a voice now saves to localStorage AND notifies voiceManager
+  function handleVoiceSelect(id) {
+    setVoiceId(id);
+    localStorage.setItem("voice_persona", id);
+    setVoiceSource("");
+
+    // ── THIS IS THE KEY FIX ──────────────────────────────────────────────────
+    // Tell voiceManager to clear its cached voice so the next speak()
+    // call on ANY page (Home, Goals, Checkin) picks the newly chosen voice.
+    window.dispatchEvent(new Event("voicechange")); // triggers voiceManager listener
+    notifyVoiceChanged();                           // direct call as extra safety
+    // ────────────────────────────────────────────────────────────────────────
+  }
+
   // ── Test voice: calls ElevenLabs directly from browser ──────────────────────
   async function handleTestVoice() {
     if (testingVoice) return;
@@ -188,7 +202,6 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
 
     var text = "Hello! I'm your AI coach. Let's achieve your goals together!";
 
-    // 1. Try ElevenLabs directly (no backend, so Render IP block is irrelevant)
     var ok = false;
     try {
       var resp = await fetch(
@@ -226,7 +239,6 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
       console.warn("ElevenLabs direct failed:", e.message);
     }
 
-    // 2. Fallback to browser TTS
     if (!ok) {
       setVoiceSource("browser");
       speakWithBrowser(text, voiceId, function(){ setTestingVoice(false); });
@@ -339,7 +351,9 @@ function Settings({ user, darkMode: darkModeProp, toggleTheme, onNavigate }) {
                   {VOICE_OPTIONS.map(function(v){
                     var sel = voiceId === v.id;
                     return (
-                      <button key={v.id} onClick={function(){ setVoiceId(v.id); localStorage.setItem("voice_persona", v.id); setVoiceSource(""); }}
+                      <button key={v.id}
+                        // ── FIX: now calls handleVoiceSelect instead of inline setState ──
+                        onClick={function(){ handleVoiceSelect(v.id); }}
                         style={{display:"flex",alignItems:"center",gap:11,padding:"10px 13px",borderRadius:11,cursor:"pointer",border:sel?"1px solid var(--accent)":"1px solid var(--border)",background:sel?"rgba(124,92,252,0.08)":"var(--card)",transition:"all .15s",textAlign:"left",WebkitTapHighlightColor:"transparent"}}>
                         <div style={{width:34,height:34,borderRadius:"50%",background:sel?"var(--accent)":"var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>🎙️</div>
                         <div style={{flex:1}}>

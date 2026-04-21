@@ -6,7 +6,6 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
-
 var API = "https://manifesting-motivation-backend.onrender.com/api";
 
 // ── Butterfly logo (used in AI loading state) ─────────────────────────────────

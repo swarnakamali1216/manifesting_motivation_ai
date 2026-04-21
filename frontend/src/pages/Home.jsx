@@ -6,8 +6,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
-import { speak, stop, onSpeakingChange, notifyPersonaChanged } from "./voiceManager";
-
+import { speak, onSpeakingChange, notifyPersonaChanged } from "./voiceManager";
 var API = "https://manifesting-motivation-backend.onrender.com/api";
 var IST = 330;
 

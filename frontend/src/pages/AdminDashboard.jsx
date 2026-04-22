@@ -4,6 +4,7 @@
  * - Persona: shows actual personaMap correctly
  * - Goals learning style resource label shown as badge
  * - All data from real API endpoints
+ * - active_users now reflects last_login within 30 days (not is_active flag)
  */
 import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
@@ -170,9 +171,13 @@ function AdminDashboard({ user }) {
     return !q||(u.name||"").toLowerCase().includes(q)||(u.email||"").toLowerCase().includes(q);
   });
 
+  // ✅ FIX: active_users from API (now counts last_login within 30 days)
+  // Fallback: count users whose is_active=true from the users list returned by /admin/users
+  var activeUsersCount = stats?.active_users ?? users.filter(function(u){ return u.is_active; }).length;
+
   var displayStats = {
     total_users:        stats?.total_users       ?? users.length,
-    active_users:       stats?.active_users      ?? users.filter(function(u){ return u.is_active; }).length,
+    active_users:       activeUsersCount,
     sessions_week:      stats?.sessions_week     ?? 0,
     total_xp:           stats?.total_xp          ?? users.reduce(function(acc,u){ return acc+(u.xp||0); },0),
     total_goals:        stats?.total_goals       ?? 0,
@@ -256,7 +261,8 @@ function AdminDashboard({ user }) {
           <SectionTitle>PLATFORM SUMMARY</SectionTitle>
           <StatGrid cols={4}>
             <StatCard icon="👥" label="Total Users"  value={displayStats.total_users}                   color="#7c5cfc"/>
-            <StatCard icon="✅" label="Active Users" value={displayStats.active_users}                  color="#4ade80"/>
+            {/* ✅ FIX: subtitle clarifies active = logged in within 30 days */}
+            <StatCard icon="✅" label="Active Users" value={displayStats.active_users}                  color="#4ade80" sub="logged in (30d)"/>
             <StatCard icon="💬" label="AI Sessions"  value={totalSessions}                              color="#60a5fa"/>
             <StatCard icon="📅" label="This Week"    value={displayStats.sessions_week}                 color="#a78bfa" sub="sessions"/>
           </StatGrid>
@@ -454,10 +460,10 @@ function AdminDashboard({ user }) {
                     <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:"800", fontSize:"14px", color:"var(--text)", marginBottom:"2px", display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap" }}>
                       {name}
                       {u.role==="admin" && <span style={{ padding:"2px 7px", borderRadius:"6px", background:"rgba(251,191,36,0.1)", border:"1px solid rgba(251,191,36,0.3)", color:"#fbbf24", fontSize:"10px", fontWeight:"800" }}>👑 Admin</span>}
-                      {!u.is_active && <span style={{ padding:"2px 7px", borderRadius:"6px", background:"rgba(248,113,113,0.1)", border:"1px solid rgba(248,113,113,0.3)", color:"#f87171", fontSize:"10px", fontWeight:"800" }}>Disabled</span>}
+                      {!u.is_active && <span style={{ padding:"2px 7px", borderRadius:"6px", background:"rgba(248,113,113,0.1)", border:"1px solid rgba(248,113,113,0.3)", color:"#f87171", fontSize:"10px", fontWeight:"800" }}>Inactive</span>}
                     </div>
                     <div style={{ fontSize:"11px", color:"var(--muted)" }}>
-                      {u.email} · joined {u.joined||"N/A"}
+                      {u.email} · joined {u.joined||"N/A"} · last login {u.last_login||"—"}
                     </div>
                     {/* ── FIXED: shows "🏆 Champion (Lv.6)" not "Level 6: Level 6" ── */}
                     <div style={{ fontSize:"10px", color:"var(--muted)", marginTop:"2px", display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap" }}>
@@ -545,4 +551,3 @@ function AdminDashboard({ user }) {
 }
 
 export default AdminDashboard;
-

@@ -4,6 +4,8 @@ FIXES:
   - /admin/sessions was missing (caused 404 + empty emotion charts)
   - /admin/retention was missing (caused 404)
   - emotion column handled safely even if vader_score column missing
+  - active_users now counts users with last_login within last 30 days
+    (previously always returned 0 because is_active flag was never set on login)
 """
 from flask import Blueprint, request, jsonify
 from sqlalchemy import text as sql_text
@@ -28,19 +30,32 @@ def admin_stats():
     db = SessionLocal()
     try:
         week_ago        = datetime.utcnow() - timedelta(days=7)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+
         total_users     = safe_count(db, "SELECT COUNT(*) FROM users")
         total_goals     = safe_count(db, "SELECT COUNT(*) FROM goals")
         total_sessions  = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions")
         total_journals  = safe_count(db, "SELECT COUNT(*) FROM journal_entries")
         total_checkins  = safe_count(db, "SELECT COUNT(*) FROM check_ins")
         completed_goals = safe_count(db, "SELECT COUNT(*) FROM goals WHERE completed=TRUE OR is_complete=TRUE")
-        active_users    = safe_count(db, "SELECT COUNT(*) FROM users WHERE is_active=TRUE")
         new_users_week  = safe_count(db, "SELECT COUNT(*) FROM users WHERE created_at >= :w", {"w": week_ago})
         sessions_week   = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE created_at >= :w", {"w": week_ago})
         total_xp        = safe_count(db, "SELECT COALESCE(SUM(xp),0) FROM users")
         pos_sessions    = safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE emotion IN ('positive','focused','hopeful','excited')")
         mood_pct        = round((pos_sessions / max(1, total_sessions)) * 100, 1)
         goal_pct        = round((completed_goals / max(1, total_goals)) * 100, 1)
+
+        # ✅ FIX: active_users = logged in within last 30 days
+        # Previously used is_active=TRUE which was never set automatically on login → always 0
+        active_users = safe_count(
+            db,
+            "SELECT COUNT(*) FROM users WHERE last_login >= :d",
+            {"d": thirty_days_ago}
+        )
+
+        # Fallback: if last_login column doesn't exist or all are NULL, use is_active flag
+        if active_users == 0:
+            active_users = safe_count(db, "SELECT COUNT(*) FROM users WHERE is_active=TRUE")
 
         try:
             avg_streak = round(float(
@@ -169,12 +184,22 @@ def admin_users():
             ORDER BY u.created_at DESC
         """)).fetchall()
         users = []
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         for r in rows:
             try: badges = json.loads(r[11]) if r[11] else []
             except: badges = []
+            # ✅ FIX: compute is_active from last_login if the flag isn't set
+            last_login_dt = r[9]
+            is_active_flag = bool(r[4])
+            if not is_active_flag and last_login_dt:
+                if isinstance(last_login_dt, str):
+                    try: last_login_dt = datetime.fromisoformat(last_login_dt)
+                    except: last_login_dt = None
+                if last_login_dt and last_login_dt >= thirty_days_ago:
+                    is_active_flag = True
             users.append({
                 "id": r[0], "name": r[1] or "Unknown", "email": r[2] or "",
-                "role": r[3] or "user", "is_active": r[4],
+                "role": r[3] or "user", "is_active": is_active_flag,
                 "xp": r[5] or 0, "level": r[6] or 1, "streak": r[7] or 0,
                 "joined": str(r[8])[:10] if r[8] else "—",
                 "last_login": str(r[9])[:10] if r[9] else "—",
@@ -287,11 +312,13 @@ def admin_retention():
 def admin_export():
     db = SessionLocal()
     try:
-        week_ago = datetime.utcnow() - timedelta(days=7)
+        week_ago        = datetime.utcnow() - timedelta(days=7)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         return jsonify({
             "exported_at":    datetime.utcnow().isoformat(),
             "total_users":    safe_count(db, "SELECT COUNT(*) FROM users"),
-            "active_users":   safe_count(db, "SELECT COUNT(*) FROM users WHERE is_active=TRUE"),
+            # ✅ FIX: active_users uses last_login, not is_active flag
+            "active_users":   safe_count(db, "SELECT COUNT(*) FROM users WHERE last_login >= :d", {"d": thirty_days_ago}),
             "total_sessions": safe_count(db, "SELECT COUNT(*) FROM motivation_sessions"),
             "sessions_week":  safe_count(db, "SELECT COUNT(*) FROM motivation_sessions WHERE created_at >= :w", {"w": week_ago}),
             "total_goals":    safe_count(db, "SELECT COUNT(*) FROM goals"),

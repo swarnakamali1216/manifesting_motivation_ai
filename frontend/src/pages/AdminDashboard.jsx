@@ -2,9 +2,8 @@
  * AdminDashboard.jsx — FIXED
  * - Level display: "Level 6: Level 6" → "🏆 Champion (Lv.6)"
  * - Persona: shows actual personaMap correctly
- * - Goals learning style resource label shown as badge
- * - All data from real API endpoints
- * - active_users now reflects last_login within 30 days (not is_active flag)
+ * - active_users now reflects last_login within 30 days
+ * - Persona pie chart JSX syntax fixed (label={false} broke the Cell children)
  */
 import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
@@ -15,7 +14,6 @@ import {
 
 var API = "https://manifesting-motivation-backend.onrender.com/api";
 
-// ── Level name map — matches gamification.py exactly ─────────────────────────
 var LEVELS_MAP = {
   1:"Seedling", 2:"Explorer", 3:"Achiever", 4:"Challenger", 5:"Warrior",
   6:"Champion", 7:"Master", 8:"Elite", 9:"Legend", 10:"Transcendent",
@@ -33,22 +31,22 @@ function getLevelNum(level) {
   if (typeof level === "object" && level !== null) return level.level || 1;
   return parseInt(level, 10) || 1;
 }
-function getLevelName(level) {
-  var n = getLevelNum(level);
-  return LEVELS_MAP[n] || "Seedling";
-}
-function getLevelEmoji(level) {
-  var n = getLevelNum(level);
-  return LEVEL_EMOJI[n] || "🌱";
-}
+function getLevelName(level) { return LEVELS_MAP[getLevelNum(level)] || "Seedling"; }
+function getLevelEmoji(level) { return LEVEL_EMOJI[getLevelNum(level)] || "🌱"; }
+
 var EMOTION_COLORS = {
   positive:"#4ade80", excited:"#fb923c", focused:"#a78bfa", hopeful:"#60a5fa",
   neutral:"#94a3b8",  stressed:"#fbbf24", anxious:"#fbbf24",
   sad:"#f87171",      negative:"#f87171", frustrated:"#fb923c", crisis:"#ef4444",
   happy:"#4ade80",    calm:"#60a5fa",     motivated:"#a78bfa",
 };
-var PIE_COLORS = ["#4ade80","#60a5fa","#94a3b8","#f87171","#fbbf24","#a78bfa","#fb923c"];
+var PIE_COLORS = ["#4ade80","#60a5fa","#a78bfa","#f87171","#fbbf24","#fb923c","#94a3b8"];
 var TT = { contentStyle:{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:"10px", fontSize:"12px" } };
+
+var PERSONA_EMOJI = {
+  explorer:"🧭", achiever:"🎯", athlete:"🏃", student:"📚",
+  coach:"💪", parent:"👨‍👧", general:"🌱", warrior:"🔥", champion:"🏆",
+};
 
 function StatCard({ icon, label, value, color, sub }) {
   return (
@@ -73,37 +71,79 @@ function ChartBox({ children }) {
   return <div style={{ background:"var(--card)", borderRadius:"20px", padding:"18px", border:"1px solid var(--border)", marginBottom:"20px" }}>{children}</div>;
 }
 
+// ✅ Separate component — avoids JSX nesting bug with label={false} + Cell children
+function PersonaPieChart({ data }) {
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={220}>
+        <PieChart>
+          <Pie data={data} cx="50%" cy="50%" outerRadius={85} dataKey="value" label={false}>
+            {data.map(function(_, i) {
+              return <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />;
+            })}
+          </Pie>
+          <Legend
+            formatter={function(value, entry) {
+              var emoji = PERSONA_EMOJI[value.toLowerCase()] || "👤";
+              return (
+                <span style={{ color:"var(--text)", fontSize:"12px", fontWeight:"600" }}>
+                  {emoji} {value} ({entry.payload.value})
+                </span>
+              );
+            }}
+          />
+          <Tooltip
+            contentStyle={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:"10px", fontSize:"12px" }}
+            formatter={function(value, name) { return [value + " users", name]; }}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(100px,1fr))", gap:"8px", marginTop:"12px" }}>
+        {data.map(function(entry, i) {
+          var emoji = PERSONA_EMOJI[entry.name.toLowerCase()] || "👤";
+          return (
+            <div key={entry.name} style={{ background:"var(--bg)", border:"1px solid var(--border)", borderRadius:"10px", padding:"10px 8px", textAlign:"center", borderTop:"3px solid "+PIE_COLORS[i%PIE_COLORS.length] }}>
+              <div style={{ fontSize:"18px" }}>{emoji}</div>
+              <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:"900", fontSize:"18px", color:PIE_COLORS[i%PIE_COLORS.length], lineHeight:1, margin:"4px 0 2px" }}>{entry.value}</div>
+              <div style={{ fontSize:"10px", color:"var(--muted)", fontWeight:"600" }}>{entry.name}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AdminDashboard({ user }) {
-  var [users,      setUsers]      = useState([]);
-  var [sessions,   setSessions]   = useState([]);
-  var [stats,      setStats]      = useState(null);
-  var [activity,   setActivity]   = useState([]);
-  var [retention,  setRetention]  = useState([]);
-  var [loading,    setLoading]    = useState(true);
-  var [tab,        setTab]        = useState("overview");
-  var [error,      setError]      = useState(null);
-  var [search,     setSearch]     = useState("");
-  var [togglingId, setTogglingId] = useState(null);
-  var [lastRefresh,setLastRefresh]= useState(null);
+  var [users,       setUsers]      = useState([]);
+  var [sessions,    setSessions]   = useState([]);
+  var [stats,       setStats]      = useState(null);
+  var [activity,    setActivity]   = useState([]);
+  var [retention,   setRetention]  = useState([]);
+  var [loading,     setLoading]    = useState(true);
+  var [tab,         setTab]        = useState("overview");
+  var [error,       setError]      = useState(null);
+  var [search,      setSearch]     = useState("");
+  var [togglingId,  setTogglingId] = useState(null);
+  var [lastRefresh, setLastRefresh]= useState(null);
 
   var loadData = useCallback(function() {
     if (!user || (user.role !== "admin" && !user.is_admin)) return;
     setLoading(true); setError(null);
     var token = localStorage.getItem("token") || "";
     var headers = token ? { Authorization:"Bearer "+token } : {};
-
     Promise.all([
-      axios.get(API+"/admin/users",             { headers }).catch(function(){ return {data:[]}; }),
+      axios.get(API+"/admin/users",              { headers }).catch(function(){ return {data:[]}; }),
       axios.get(API+"/admin/sessions?limit=2000",{ headers }).catch(function(){ return {data:[]}; }),
-      axios.get(API+"/admin/stats",             { headers }).catch(function(){ return {data:{}}; }),
-      axios.get(API+"/admin/activity",          { headers }).catch(function(){ return {data:[]}; }),
-      axios.get(API+"/admin/retention",         { headers }).catch(function(){ return {data:[]}; }),
+      axios.get(API+"/admin/stats",              { headers }).catch(function(){ return {data:{}}; }),
+      axios.get(API+"/admin/activity",           { headers }).catch(function(){ return {data:[]}; }),
+      axios.get(API+"/admin/retention",          { headers }).catch(function(){ return {data:[]}; }),
     ]).then(function(res) {
-      setUsers(   Array.isArray(res[0].data) ? res[0].data : []);
-      setSessions(Array.isArray(res[1].data) ? res[1].data : []);
-      setStats(   res[2].data || {});
-      setActivity(Array.isArray(res[3].data) ? res[3].data : []);
-      setRetention(Array.isArray(res[4].data)? res[4].data : []);
+      setUsers(    Array.isArray(res[0].data) ? res[0].data : []);
+      setSessions( Array.isArray(res[1].data) ? res[1].data : []);
+      setStats(    res[2].data || {});
+      setActivity( Array.isArray(res[3].data) ? res[3].data : []);
+      setRetention(Array.isArray(res[4].data) ? res[4].data : []);
       setLastRefresh(new Date().toLocaleTimeString());
     }).catch(function(err) {
       setError("Could not load admin data: " + (err.message || "Check backend logs."));
@@ -128,7 +168,6 @@ function AdminDashboard({ user }) {
   );
   if (error) return <div style={{ padding:"16px 20px", borderRadius:"14px", background:"rgba(248,113,113,0.07)", border:"1px solid rgba(248,113,113,0.25)", color:"#f87171", fontSize:"13px" }}>{error}</div>;
 
-  // ── Derived stats ──
   var totalSessions  = sessions.length;
   var crisisSessions = sessions.filter(function(s){ return s.is_crisis || s.emotion==="crisis"; }).length;
   var posCount       = sessions.filter(function(s){ return ["positive","excited","focused","hopeful","happy","motivated","calm"].includes((s.emotion||"").toLowerCase()); }).length;
@@ -161,36 +200,34 @@ function AdminDashboard({ user }) {
 
   var engagementData = users.slice(0,10).map(function(u){ return {name:(u.name||"User").split(" ")[0],xp:u.xp||0,sessions:u.total_ai_sessions||0}; });
 
-  // ── Persona distribution ── (reads from users.persona field)
   var personaMap = {};
   users.forEach(function(u){ var p=u.persona||"general"; personaMap[p]=(personaMap[p]||0)+1; });
-  var personaData = Object.entries(personaMap).map(function(entry){ return {name:entry[0].charAt(0).toUpperCase()+entry[0].slice(1),value:entry[1]}; });
+  var personaData = Object.entries(personaMap).map(function(entry){
+    return { name:entry[0].charAt(0).toUpperCase()+entry[0].slice(1), value:entry[1] };
+  }).sort(function(a,b){ return b.value-a.value; });
 
   var filteredUsers = users.filter(function(u){
     var q=search.toLowerCase();
     return !q||(u.name||"").toLowerCase().includes(q)||(u.email||"").toLowerCase().includes(q);
   });
 
-  // ✅ FIX: active_users from API (now counts last_login within 30 days)
-  // Fallback: count users whose is_active=true from the users list returned by /admin/users
   var activeUsersCount = stats?.active_users ?? users.filter(function(u){ return u.is_active; }).length;
-
   var displayStats = {
-    total_users:        stats?.total_users       ?? users.length,
-    active_users:       activeUsersCount,
-    sessions_week:      stats?.sessions_week     ?? 0,
-    total_xp:           stats?.total_xp          ?? users.reduce(function(acc,u){ return acc+(u.xp||0); },0),
-    total_goals:        stats?.total_goals       ?? 0,
-    completed_goals:    stats?.completed_goals   ?? 0,
-    goal_completion_pct:stats?.goal_completion_pct ?? 0,
-    total_journals:     stats?.total_journals    ?? 0,
-    avg_streak:         stats?.avg_streak        ?? 0,
-    retention_pct:      stats?.retention_pct     ?? 0,
+    total_users:         stats?.total_users         ?? users.length,
+    active_users:        activeUsersCount,
+    sessions_week:       stats?.sessions_week       ?? 0,
+    total_xp:            stats?.total_xp            ?? users.reduce(function(acc,u){ return acc+(u.xp||0); },0),
+    total_goals:         stats?.total_goals         ?? 0,
+    completed_goals:     stats?.completed_goals     ?? 0,
+    goal_completion_pct: stats?.goal_completion_pct ?? 0,
+    total_journals:      stats?.total_journals      ?? 0,
+    avg_streak:          stats?.avg_streak          ?? 0,
+    retention_pct:       stats?.retention_pct       ?? 0,
   };
 
   function handleToggle(uid) {
     setTogglingId(uid);
-    var h = {}; var t=localStorage.getItem("token"); if(t) h={Authorization:"Bearer "+t};
+    var h={}; var t=localStorage.getItem("token"); if(t) h={Authorization:"Bearer "+t};
     axios.post(API+"/admin/users/"+uid+"/toggle",{},{headers:h})
       .then(function(res){ setUsers(function(prev){ return prev.map(function(u){ return u.id===uid?{...u,is_active:res.data.is_active}:u; }); }); })
       .catch(function(){ alert("Toggle failed"); })
@@ -232,7 +269,6 @@ function AdminDashboard({ user }) {
     <div style={{ animation:"fadeIn 0.3s ease" }}>
       <style>{"@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}"}</style>
 
-      {/* Header */}
       <div style={{ marginBottom:"24px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:"12px" }}>
         <div>
           <h1 style={{ fontFamily:"'Syne',sans-serif", fontWeight:"900", fontSize:"28px", background:"linear-gradient(135deg,#e8e0ff 30%,#9b8aff)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", marginBottom:"4px" }}>Admin Panel 👑</h1>
@@ -244,39 +280,36 @@ function AdminDashboard({ user }) {
         </div>
       </div>
 
-      {/* Tabs */}
       <div style={{ display:"flex", gap:"4px", borderBottom:"1px solid var(--border)", marginBottom:"24px", overflowX:"auto" }}>
         {TABS.map(function(t){
           return (
             <button key={t.id} onClick={function(){ setTab(t.id); }} style={{ padding:"9px 14px", border:"none", background:"transparent", cursor:"pointer", fontFamily:"'Syne',sans-serif", fontWeight:"700", fontSize:"12px", color:tab===t.id?"var(--accent)":"var(--muted)", borderBottom:tab===t.id?"2px solid var(--accent)":"2px solid transparent", marginBottom:"-1px", display:"flex", alignItems:"center", gap:"5px", whiteSpace:"nowrap", transition:"all 0.15s" }}>
-              {t.icon} {t.label} {t.id==="users"&&users.length>0&&<span style={{ background:"var(--accent)", color:"white", borderRadius:"10px", padding:"1px 6px", fontSize:"10px" }}>{users.length}</span>}
+              {t.icon} {t.label}{t.id==="users"&&users.length>0&&<span style={{ background:"var(--accent)", color:"white", borderRadius:"10px", padding:"1px 6px", fontSize:"10px", marginLeft:"2px" }}>{users.length}</span>}
             </button>
           );
         })}
       </div>
 
-      {/* ══ OVERVIEW ══ */}
       {tab==="overview" && (
         <div>
           <SectionTitle>PLATFORM SUMMARY</SectionTitle>
           <StatGrid cols={4}>
-            <StatCard icon="👥" label="Total Users"  value={displayStats.total_users}                   color="#7c5cfc"/>
-            {/* ✅ FIX: subtitle clarifies active = logged in within 30 days */}
-            <StatCard icon="✅" label="Active Users" value={displayStats.active_users}                  color="#4ade80" sub="logged in (30d)"/>
-            <StatCard icon="💬" label="AI Sessions"  value={totalSessions}                              color="#60a5fa"/>
-            <StatCard icon="📅" label="This Week"    value={displayStats.sessions_week}                 color="#a78bfa" sub="sessions"/>
+            <StatCard icon="👥" label="Total Users"  value={displayStats.total_users}                    color="#7c5cfc"/>
+            <StatCard icon="✅" label="Active Users" value={displayStats.active_users}                   color="#4ade80" sub="logged in (30d)"/>
+            <StatCard icon="💬" label="AI Sessions"  value={totalSessions}                               color="#60a5fa"/>
+            <StatCard icon="📅" label="This Week"    value={displayStats.sessions_week}                  color="#a78bfa" sub="sessions"/>
           </StatGrid>
           <StatGrid cols={4}>
             <StatCard icon="⚡" label="Total XP"     value={(displayStats.total_xp||0).toLocaleString()} color="#fbbf24"/>
-            <StatCard icon="🎯" label="Goals Made"   value={displayStats.total_goals}                   color="#fb923c"/>
-            <StatCard icon="🏆" label="Goals Done"   value={displayStats.completed_goals}               color="#4ade80" sub={displayStats.goal_completion_pct+"%"}/>
-            <StatCard icon="📓" label="Journals"     value={displayStats.total_journals}                color="#a78bfa"/>
+            <StatCard icon="🎯" label="Goals Made"   value={displayStats.total_goals}                    color="#fb923c"/>
+            <StatCard icon="🏆" label="Goals Done"   value={displayStats.completed_goals}                color="#4ade80" sub={displayStats.goal_completion_pct+"%"}/>
+            <StatCard icon="📓" label="Journals"     value={displayStats.total_journals}                 color="#a78bfa"/>
           </StatGrid>
           <StatGrid cols={4}>
-            <StatCard icon="😊" label="Positive Mood" value={moodPct+"%"}                              color="#4ade80" sub="of all sessions"/>
-            <StatCard icon="🔥" label="Avg Streak"    value={displayStats.avg_streak+"d"}              color="#fb923c"/>
-            <StatCard icon="🔄" label="Retention"     value={displayStats.retention_pct+"%"}           color="#60a5fa" sub="7-day return"/>
-            <StatCard icon="🛡️" label="Crisis Alerts" value={crisisSessions}                           color="#f87171" sub="interventions"/>
+            <StatCard icon="😊" label="Positive Mood" value={moodPct+"%"}                               color="#4ade80" sub="of all sessions"/>
+            <StatCard icon="🔥" label="Avg Streak"    value={displayStats.avg_streak+"d"}               color="#fb923c"/>
+            <StatCard icon="🔄" label="Retention"     value={displayStats.retention_pct+"%"}            color="#60a5fa" sub="7-day return"/>
+            <StatCard icon="🛡️" label="Crisis Alerts" value={crisisSessions}                            color="#f87171" sub="interventions"/>
           </StatGrid>
 
           <SectionTitle>USER ENGAGEMENT (TOP 10 BY XP)</SectionTitle>
@@ -297,25 +330,16 @@ function AdminDashboard({ user }) {
           </ChartBox>
 
           {personaData.length>0 && (
-            <>
-              <SectionTitle>PERSONA DISTRIBUTION</SectionTitle>
+            <div>
+              <SectionTitle>PERSONA DISTRIBUTION ({personaData.length} types · {users.length} users)</SectionTitle>
               <ChartBox>
-                <ResponsiveContainer width="100%" height={200}>
-                  <PieChart>
-                    <Pie data={personaData} cx="50%" cy="50%" outerRadius={80} dataKey="value" label={function(e){ return e.name+" ("+e.value+")"; }} labelLine={false}>
-                      {personaData.map(function(_,i){ return <Cell key={i} fill={PIE_COLORS[i%PIE_COLORS.length]}/>; })}
-                    </Pie>
-                    <Legend formatter={function(v){ return <span style={{color:"var(--text)",fontSize:"12px"}}>{v}</span>; }}/>
-                    <Tooltip {...TT}/>
-                  </PieChart>
-                </ResponsiveContainer>
+                <PersonaPieChart data={personaData} />
               </ChartBox>
-            </>
+            </div>
           )}
         </div>
       )}
 
-      {/* ══ EMOTIONS ══ */}
       {tab==="emotions" && (
         <div>
           <SectionTitle>EMOTION FREQUENCY (FROM {totalSessions} SESSIONS)</SectionTitle>
@@ -351,7 +375,7 @@ function AdminDashboard({ user }) {
             }
           </ChartBox>
           {emotionData.length>0 && (
-            <>
+            <div>
               <SectionTitle>TOP EMOTIONS</SectionTitle>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))", gap:"10px" }}>
                 {emotionData.slice(0,6).map(function(e){
@@ -363,12 +387,11 @@ function AdminDashboard({ user }) {
                   );
                 })}
               </div>
-            </>
+            </div>
           )}
         </div>
       )}
 
-      {/* ══ ACTIVITY ══ */}
       {tab==="activity" && (
         <div>
           <SectionTitle>DAILY SESSIONS — LAST 14 DAYS</SectionTitle>
@@ -390,7 +413,7 @@ function AdminDashboard({ user }) {
             </ResponsiveContainer>
           </ChartBox>
           {activity.length>0 && (
-            <>
+            <div>
               <SectionTitle>SESSIONS VS ACTIVE USERS — LAST 30 DAYS</SectionTitle>
               <ChartBox>
                 <ResponsiveContainer width="100%" height={240}>
@@ -406,12 +429,11 @@ function AdminDashboard({ user }) {
                   </LineChart>
                 </ResponsiveContainer>
               </ChartBox>
-            </>
+            </div>
           )}
         </div>
       )}
 
-      {/* ══ RETENTION ══ */}
       {tab==="retention" && (
         <div>
           <SectionTitle>WEEKLY ACTIVE USERS — LAST 8 WEEKS</SectionTitle>
@@ -432,7 +454,6 @@ function AdminDashboard({ user }) {
         </div>
       )}
 
-      {/* ══ USERS ══ */}
       {tab==="users" && (
         <div>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px", flexWrap:"wrap", gap:"10px" }}>
@@ -447,10 +468,10 @@ function AdminDashboard({ user }) {
           )}
           <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
             {filteredUsers.map(function(u, i) {
-              var name     = u.name || "User";
-              var levelNum = getLevelNum(u.level);
-              var levelName= getLevelName(u.level);
-              var levelEmoji=getLevelEmoji(u.level);
+              var name       = u.name || "User";
+              var levelNum   = getLevelNum(u.level);
+              var levelName  = getLevelName(u.level);
+              var levelEmoji = getLevelEmoji(u.level);
               return (
                 <div key={u.id||i} style={{ background:"var(--card)", border:"1px solid var(--border)", borderRadius:"16px", padding:"16px 18px", display:"flex", gap:"14px", alignItems:"center", flexWrap:"wrap", opacity:u.is_active?1:0.55 }}>
                   <div style={{ width:"42px", height:"42px", borderRadius:"12px", background:"linear-gradient(135deg,#7c5cfc,#fc5cf0)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Syne',sans-serif", fontWeight:"800", color:"white", fontSize:"18px", flexShrink:0 }}>
@@ -465,7 +486,6 @@ function AdminDashboard({ user }) {
                     <div style={{ fontSize:"11px", color:"var(--muted)" }}>
                       {u.email} · joined {u.joined||"N/A"} · last login {u.last_login||"—"}
                     </div>
-                    {/* ── FIXED: shows "🏆 Champion (Lv.6)" not "Level 6: Level 6" ── */}
                     <div style={{ fontSize:"10px", color:"var(--muted)", marginTop:"2px", display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap" }}>
                       <span>Persona: {u.persona||"general"}</span>
                       <span style={{ padding:"2px 8px", borderRadius:"6px", background:"rgba(124,92,252,0.08)", border:"1px solid rgba(124,92,252,0.2)", color:"var(--accent)", fontWeight:"700" }}>
@@ -475,9 +495,9 @@ function AdminDashboard({ user }) {
                   </div>
                   <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
                     {[
-                      {label:"Sessions",value:u.total_ai_sessions||0,color:"#7c5cfc"},
-                      {label:"XP",      value:u.xp||0,              color:"#fbbf24"},
-                      {label:"Streak",  value:(u.streak||0)+"d",    color:"#4ade80"},
+                      {label:"Sessions", value:u.total_ai_sessions||0, color:"#7c5cfc"},
+                      {label:"XP",       value:u.xp||0,               color:"#fbbf24"},
+                      {label:"Streak",   value:(u.streak||0)+"d",     color:"#4ade80"},
                     ].map(function(s){ return (
                       <div key={s.label} style={{ textAlign:"center", padding:"5px 9px", borderRadius:"9px", background:"var(--bg)", border:"1px solid var(--border)" }}>
                         <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:"800", fontSize:"13px", color:s.color }}>{s.value}</div>
@@ -502,7 +522,6 @@ function AdminDashboard({ user }) {
         </div>
       )}
 
-      {/* ══ SAFETY ══ */}
       {tab==="safety" && (
         <div>
           <div style={{ padding:"16px 20px", borderRadius:"14px", background:"rgba(96,165,250,0.06)", border:"1px solid rgba(96,165,250,0.2)", marginBottom:"20px" }}>
